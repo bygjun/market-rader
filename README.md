@@ -69,3 +69,5 @@ npm run report -- --dry-run --input-report config/sample-report.json
 - `MAIL_FROM`, `MAIL_TO`
 
 또는 단일 Secret `ENV_B64`에 `.env` 파일 전체를 base64로 인코딩해서 넣으면(권장) 위 Secrets 없이도 동작합니다.
+
+이미 `MARKET_RADER_SECRET_YML`로 만들어둔 경우, Actions에서 해당 Secret을 읽어 `.env`로 변환해 실행하도록 설정되어 있습니다(간단한 `KEY: value` YAML 또는 `.env` 텍스트/ base64 모두 지원).
