@@ -152,8 +152,31 @@ export function buildReportFromSourcesPrompt(args: {
     `- Provide an "insight" that explains strategic meaning (Insight First).`,
     `- importance_score: 1-5; pick top_highlights as the 3 most important items.`,
     `- Provide 3-6 action_items (array of strings).`,
+    `- Do NOT include company_homepages here; it will be attached separately.`,
     ``,
     `Report schema (keys must match exactly):`,
-    `{"report_date":"YYYY-MM-DD","week_number":2,"top_highlights":[{"company":"...","category":"CAT-A","title":"...","insight":"...","importance_score":5,"link":"https://..."}],"category_updates":{"CAT-A":[{"company":"...","tag":"...","title":"...","url":"https://...","insight":"..."}],"CAT-B":[],"CAT-C":[],"CAT-D":[]},"hiring_signals":[{"company":"...","position":"...","strategic_inference":"...","url":"https://..."}],"action_items":["..."]}`,
+    `{"report_date":"YYYY-MM-DD","week_number":2,"company_homepages":{"회사명":"https://..."}, "top_highlights":[{"company":"...","category":"CAT-A","title":"...","insight":"...","importance_score":5,"link":"https://..."}],"category_updates":{"CAT-A":[{"company":"...","tag":"...","title":"...","url":"https://...","insight":"..."}],"CAT-B":[],"CAT-C":[],"CAT-D":[]},"hiring_signals":[{"company":"...","position":"...","strategic_inference":"...","url":"https://..."}],"action_items":["..."]}`,
+  ].join("\n");
+}
+
+export function buildCompanyHomepagesPrompt(args: { lookbackDays: number; companies: string[] }): string {
+  const companies = args.companies.map((c) => `- ${c}`).join("\n");
+  return [
+    `You are collecting official company homepages in Korea.`,
+    `You MUST use grounded web search.`,
+    `Return ONLY JSON, no markdown, no extra text.`,
+    ``,
+    `Task: for each company below, find the official homepage URL (not a news article, not a social profile).`,
+    `If you cannot confidently find the official homepage, omit that company from the output.`,
+    ``,
+    `Companies:`,
+    companies,
+    ``,
+    `Output schema:`,
+    `{"company_homepages":{"회사명":"https://official-domain.tld","다른회사":"https://..."}}`,
+    ``,
+    `Rules:`,
+    `- NEVER fabricate URLs. Do not guess URL slugs or domains.`,
+    `- Only output URLs you actually found in search results.`,
   ].join("\n");
 }

@@ -5,6 +5,10 @@ export const WeeklyReportJsonSchema = {
   properties: {
     report_date: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
     week_number: { type: "integer", minimum: 1, maximum: 53 },
+    company_homepages: {
+      type: "object",
+      additionalProperties: { type: "string" },
+    },
     top_highlights: {
       type: "array",
       items: {
@@ -105,4 +109,3 @@ export const WeeklyReportJsonSchema = {
     action_items: { type: "array", items: { type: "string" } },
   },
 } as const;
-

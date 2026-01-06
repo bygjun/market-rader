@@ -6,6 +6,7 @@ import { logger } from "../lib/logger.js";
 import { listModels, pickFallbackModel } from "./models.js";
 import { WeeklyReportJsonSchema } from "./reportJsonSchema.js";
 import { SourceListSchema, type SourceList } from "./sourcesSchema.js";
+import { CompanyHomepagesSchema, type CompanyHomepages } from "./homepagesSchema.js";
 
 function parseJsonLenient(text: string): unknown {
   try {
@@ -107,12 +108,6 @@ function extractGroundedUrls(result: Awaited<ReturnType<GoogleGenAI["models"]["g
   return urls;
 }
 
-function filterSourcesToGrounding(sources: SourceList, groundedUrls: string[]): SourceList {
-  const allowed = new Set(groundedUrls.map(normalizeUrl));
-  const filtered = sources.sources.filter((s) => allowed.has(normalizeUrl(s.url)));
-  return { sources: filtered };
-}
-
 function enforceAllowedUrlsOnReport(report: WeeklyReport, allowedUrls: string[]): WeeklyReport {
   const allowed = new Set(allowedUrls.map(normalizeUrl));
   const copy: WeeklyReport = JSON.parse(JSON.stringify(report));
@@ -196,10 +191,18 @@ export async function generateSourceList(args: {
   const text = result.text ?? "";
   const parsed = parseJsonLenient(text);
   const sources = SourceListSchema.parse(parsed);
-  const filtered = groundedUrls.length ? filterSourcesToGrounding(sources, groundedUrls) : sources;
+  // Grounding metadata isn't always populated reliably across models/accounts.
+  // We rely on the 2-step pipeline (source list → report restricted to that list)
+  // to prevent URL hallucination, rather than filtering by groundingChunks here.
+  const filtered = sources;
 
   logger.info(
-    { model: modelUsed, groundedUrls: groundedUrls.length, sources: sources.sources.length, kept: filtered.sources.length },
+    {
+      model: modelUsed,
+      groundedUrls: groundedUrls.length,
+      sources: sources.sources.length,
+      kept: filtered.sources.length,
+    },
     "Collected sources",
   );
 
@@ -212,6 +215,40 @@ export async function generateWeeklyReportFromSources(args: {
   allowedUrls: string[];
 }): Promise<{ report: WeeklyReport; meta: { model: string } }> {
   const ai = new GoogleGenAI({ apiKey: args.env.GEMINI_API_KEY });
+
+  const repairFromText = async (model: string, badText: string): Promise<WeeklyReport> => {
+    const repairPrompt = [
+      "You produced an invalid or schema-noncompliant JSON report.",
+      "Fix it to strictly match the required JSON schema.",
+      "Rules:",
+      "- Return ONLY a single JSON object (no markdown).",
+      "- Do NOT add new facts. Do NOT add new items unless required to satisfy schema defaults.",
+      "- Preserve existing items as much as possible; only fill missing required fields and fix types.",
+      "- All link/url fields MUST be valid URLs and MUST be chosen from the provided Allowed URLs list.",
+      "",
+      "Allowed URLs:",
+      ...args.allowedUrls.map((u) => `- ${u}`),
+      "",
+      "BAD OUTPUT:",
+      badText,
+    ].join("\n");
+
+    const repaired = await ai.models.generateContent({
+      model,
+      contents: repairPrompt,
+      config: {
+        temperature: 0,
+        maxOutputTokens: 6000,
+        responseMimeType: "application/json",
+        responseJsonSchema: WeeklyReportJsonSchema,
+      },
+    });
+
+    const repairedText = repaired.text ?? "";
+    const repairedParsed = parseJsonLenient(repairedText);
+    const repairedReportRaw = WeeklyReportSchema.parse(normalizeRootJson(repairedParsed));
+    return enforceAllowedUrlsOnReport(repairedReportRaw, args.allowedUrls);
+  };
 
   const run = async (modelName: string) => {
     return ai.models.generateContent({
@@ -228,10 +265,42 @@ export async function generateWeeklyReportFromSources(args: {
 
   const { modelUsed, result } = await selectModelOrFallback({ env: args.env, ai, model: args.env.GEMINI_MODEL, run });
   const text = result.text ?? "";
-  const parsed = parseJsonLenient(text);
-  const reportRaw = WeeklyReportSchema.parse(normalizeRootJson(parsed));
-  const report = enforceAllowedUrlsOnReport(reportRaw, args.allowedUrls);
+  let report: WeeklyReport;
+  try {
+    const parsed = parseJsonLenient(text);
+    const reportRaw = WeeklyReportSchema.parse(normalizeRootJson(parsed));
+    report = enforceAllowedUrlsOnReport(reportRaw, args.allowedUrls);
+  } catch (err) {
+    report = await repairFromText(modelUsed, text);
+  }
+
   return { report, meta: { model: modelUsed } };
+}
+
+export async function generateCompanyHomepages(args: {
+  env: GeminiEnv;
+  prompt: string;
+}): Promise<{ homepages: CompanyHomepages; meta: { model: string } }> {
+  const ai = new GoogleGenAI({ apiKey: args.env.GEMINI_API_KEY });
+
+  const run = async (modelName: string) => {
+    return ai.models.generateContent({
+      model: modelName,
+      contents: args.prompt,
+      config: {
+        tools: [{ googleSearch: {} }],
+        temperature: 0.2,
+        maxOutputTokens: 4000,
+        responseMimeType: "application/json",
+      },
+    });
+  };
+
+  const { modelUsed, result } = await selectModelOrFallback({ env: args.env, ai, model: args.env.GEMINI_MODEL, run });
+  const text = result.text ?? "";
+  const parsed = parseJsonLenient(text);
+  const homepages = CompanyHomepagesSchema.parse(parsed);
+  return { homepages, meta: { model: modelUsed } };
 }
 
 export async function generateWeeklyReport(args: {

@@ -9,6 +9,22 @@ function categoryName(config: ResearchConfig, id: string): string {
   return `${c.emoji ? `${c.emoji} ` : ""}${c.name}`;
 }
 
+function normalizeCompanyKey(company: string): string {
+  let s = company.trim();
+  // Remove trailing parenthetical aliases: "업스테이지 (Upstage)" -> "업스테이지"
+  s = s.replace(/\s*\([^)]*\)\s*/g, " ").trim();
+  // If it contains a dash separator, keep the left part
+  s = s.split("—")[0]?.split("-")[0]?.trim() ?? s;
+  return s;
+}
+
+function companyLabel(report: WeeklyReport, company: string): string {
+  const homepages = report.company_homepages ?? {};
+  const candidates = [company, normalizeCompanyKey(company)];
+  const homepage = candidates.map((c) => homepages[c]).find((u) => typeof u === "string" && u.length > 0);
+  return homepage ? `[${company}](${homepage})` : company;
+}
+
 export function renderMarkdown(report: WeeklyReport, config: ResearchConfig): string {
   const lines: string[] = [];
 
@@ -21,7 +37,9 @@ export function renderMarkdown(report: WeeklyReport, config: ResearchConfig): st
     for (const item of report.top_highlights.slice(0, 3)) {
       const scoreTag =
         item.importance_score >= 5 ? "🚨 Critical" : item.importance_score >= 4 ? "✨ Important" : "🗒️ Update";
-      lines.push(`- **[${scoreTag}]** **${item.company}** — ${item.title}${item.link ? ` ([링크](${item.link}))` : ""}`);
+      const company = companyLabel(report, item.company);
+      const source = item.link ? ` ([출처](${item.link}))` : "";
+      lines.push(`- **[${scoreTag}]** **${company}** — ${item.title}${source}`);
       lines.push(`  - Insight: ${item.insight}`);
     }
     lines.push("");
@@ -33,8 +51,9 @@ export function renderMarkdown(report: WeeklyReport, config: ResearchConfig): st
     if (!updates?.length) continue;
     lines.push(`### ${categoryName(config, catId)}`);
     for (const u of updates) {
-      const url = u.url ? ` ([링크](${u.url}))` : "";
-      lines.push(`- \`[${u.tag}]\` **${u.company}:** ${u.title}${url}`);
+      const company = companyLabel(report, u.company);
+      const source = u.url ? ` ([출처](${u.url}))` : "";
+      lines.push(`- \`[${u.tag}]\` **${company}:** ${u.title}${source}`);
       if (u.insight) lines.push(`  - Insight: ${u.insight}`);
     }
     lines.push("");
@@ -45,8 +64,9 @@ export function renderMarkdown(report: WeeklyReport, config: ResearchConfig): st
     lines.push("| 기업명 | 채용 직무 | 우리의 해석 (Hidden Strategy) |");
     lines.push("| :--- | :--- | :--- |");
     for (const h of report.hiring_signals) {
-      const company = h.url ? `[${h.company}](${h.url})` : h.company;
-      lines.push(`| ${company} | ${h.position} | ${h.strategic_inference} |`);
+      const company = companyLabel(report, h.company);
+      const position = h.url ? `[${h.position}](${h.url})` : h.position;
+      lines.push(`| ${company} | ${position} | ${h.strategic_inference} |`);
     }
     lines.push("");
   }
@@ -95,4 +115,3 @@ export async function renderHtmlFromMarkdown(markdown: string): Promise<string> 
   </body>
 </html>`;
 }
-

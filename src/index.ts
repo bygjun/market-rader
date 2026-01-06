@@ -7,8 +7,18 @@ import { loadGeminiEnv, loadMailEnv } from "./lib/env.js";
 import { logger } from "./lib/logger.js";
 import { getIsoDateInTimeZone, getWeekNumberInTimeZone } from "./lib/date.js";
 import { loadResearchConfig } from "./research/config.js";
-import { buildReportFromSourcesPrompt, buildSourcesPrompt, buildWeeklyPrompt } from "./research/prompt.js";
-import { generateSourceList, generateWeeklyReport, generateWeeklyReportFromSources } from "./research/gemini.js";
+import {
+  buildCompanyHomepagesPrompt,
+  buildReportFromSourcesPrompt,
+  buildSourcesPrompt,
+  buildWeeklyPrompt,
+} from "./research/prompt.js";
+import {
+  generateCompanyHomepages,
+  generateSourceList,
+  generateWeeklyReport,
+  generateWeeklyReportFromSources,
+} from "./research/gemini.js";
 import { WeeklyReportSchema } from "./research/schema.js";
 import { postprocessReport } from "./research/postprocess.js";
 import { renderHtmlFromMarkdown, renderMarkdown } from "./email/render.js";
@@ -54,6 +64,13 @@ async function main(): Promise<void> {
     const allowedUrls = sourcesResult.sources.sources.map((s) => s.url);
 
     if (allowedUrls.length >= 3) {
+      const companies = Array.from(new Set(sourcesResult.sources.sources.map((s) => s.company))).slice(0, 50);
+      const homepagesPrompt = buildCompanyHomepagesPrompt({
+        lookbackDays: researchConfig.lookback_days,
+        companies,
+      });
+      const homepagesResult = await generateCompanyHomepages({ env: geminiEnv, prompt: homepagesPrompt });
+
       const reportPrompt = buildReportFromSourcesPrompt({
         reportDate,
         weekNumber,
@@ -62,13 +79,37 @@ async function main(): Promise<void> {
         allowedUrls,
       });
       const generated = await generateWeeklyReportFromSources({ env: geminiEnv, prompt: reportPrompt, allowedUrls });
-      report = generated.report;
+      report = {
+        ...generated.report,
+        company_homepages: {
+          ...(generated.report.company_homepages ?? {}),
+          ...(homepagesResult.homepages.company_homepages ?? {}),
+        },
+      };
       modelUsed = generated.meta.model;
     } else {
       // Fallback to one-shot if grounding metadata is missing or too few sources were captured.
       const prompt = buildWeeklyPrompt({ reportDate, weekNumber, config: researchConfig });
       const generated = await generateWeeklyReport({ env: geminiEnv, prompt });
-      report = generated.report;
+      const companies = Array.from(
+        new Set([
+          ...generated.report.top_highlights.map((h) => h.company),
+          ...Object.values(generated.report.category_updates).flat().map((u) => u.company),
+          ...generated.report.hiring_signals.map((h) => h.company),
+        ]),
+      ).slice(0, 50);
+      const homepagesPrompt = buildCompanyHomepagesPrompt({
+        lookbackDays: researchConfig.lookback_days,
+        companies,
+      });
+      const homepagesResult = await generateCompanyHomepages({ env: geminiEnv, prompt: homepagesPrompt });
+      report = {
+        ...generated.report,
+        company_homepages: {
+          ...(generated.report.company_homepages ?? {}),
+          ...(homepagesResult.homepages.company_homepages ?? {}),
+        },
+      };
       modelUsed = generated.meta.model;
     }
 

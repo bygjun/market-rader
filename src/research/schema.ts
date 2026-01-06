@@ -75,6 +75,7 @@ const ActionItemSchema = z.preprocess((value) => {
 export const WeeklyReportSchema = z.object({
   report_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   week_number: z.number().int().min(1).max(53),
+  company_homepages: z.record(z.string().min(1), z.string().url()).default({}),
   top_highlights: z.array(HighlightSchema).default([]),
   category_updates: z
     .object({

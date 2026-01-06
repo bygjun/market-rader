@@ -22,6 +22,7 @@ cp .env.example .env
 - `min_companies_per_category`로 카테고리별 최소 기업 수를 늘릴 수 있습니다(필요 시 watchlist 외 기업도 자동 탐색).
 - `prefer_startups`, `min_startups_per_category`, `excluded_companies`로 대기업 편향을 줄이고 스타트업/스케일업 위주로 구성할 수 있습니다.
 - 링크 환각 방지를 위해 기본적으로 2단계로 동작합니다: (1) grounded search로 소스 URL 목록 수집 → (2) 그 URL만 사용해 리포트 작성.
+- 메일에서 회사명은 가능하면 공식 홈페이지로 링크됩니다(출처 링크는 별도로 표기).
 - (선택) `verify_source_urls=true`로 켜면 HTTP 상태체크로 404 링크를 추가로 제거/수정합니다.
 
 ## 실행
