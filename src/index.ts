@@ -63,7 +63,7 @@ async function main(): Promise<void> {
     const sourcesResult = await generateSourceList({ env: geminiEnv, prompt: sourcesPrompt });
     const allowedUrls = sourcesResult.sources.sources.map((s) => s.url);
 
-    if (allowedUrls.length >= 3) {
+    if (allowedUrls.length >= 1) {
       const companies = Array.from(new Set(sourcesResult.sources.sources.map((s) => s.company))).slice(0, 50);
       const homepagesPrompt = buildCompanyHomepagesPrompt({
         lookbackDays: researchConfig.lookback_days,

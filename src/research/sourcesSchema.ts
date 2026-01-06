@@ -22,7 +22,7 @@ export const SourceItemSchema = z.object({
   company: z.string().min(1),
   category: CategoryId,
   title: z.string().min(1),
-  url: z.preprocess(coerceUrl, z.string().url()),
+  url: z.preprocess((v) => coerceUrl(v) ?? v, z.string().url()),
   published_date: z.string().optional(),
   note: z.string().optional(),
   quote: z.preprocess((value) => {
@@ -32,9 +32,17 @@ export const SourceItemSchema = z.object({
   }, z.string().min(20).max(400).optional()),
 });
 
-export const SourceListSchema = z.object({
-  sources: z.array(SourceItemSchema).default([]),
-});
+export const SourceListSchema = z
+  .object({
+    sources: z.array(z.unknown()).default([]),
+  })
+  .transform((input) => {
+    const sources = input.sources
+      .map((item) => SourceItemSchema.safeParse(item))
+      .filter((r) => r.success)
+      .map((r) => r.data);
+    return { sources };
+  });
 
 export type SourceItem = z.infer<typeof SourceItemSchema>;
 export type SourceList = z.infer<typeof SourceListSchema>;
