@@ -1,0 +1,44 @@
+name: Market Radar Daily
+
+on:
+  schedule:
+    # Every day 09:00 KST (00:00 UTC)
+    - cron: "0 0 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    env:
+      ENV_B64: ${{ secrets.ENV_B64 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Run report (ENV_B64)
+        if: env.ENV_B64 != ''
+        run: |
+          printf "%s" "$ENV_B64" | base64 --decode > .env
+          npm run report
+
+      - name: Run report (secrets)
+        if: env.ENV_B64 == ''
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL || 'gemini-2.5-flash' }}
+          REQUIRE_GROUNDING: ${{ secrets.REQUIRE_GROUNDING || 'false' }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_SECURE: ${{ secrets.SMTP_SECURE }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          MAIL_FROM: ${{ secrets.MAIL_FROM }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
+          MAIL_SUBJECT_PREFIX: ${{ secrets.MAIL_SUBJECT_PREFIX || '[Market Radar]' }}
+          TZ: Asia/Seoul
+        run: npm run report

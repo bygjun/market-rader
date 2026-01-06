@@ -1,0 +1,59 @@
+{
+  "timezone": "Asia/Seoul",
+  "report_name": "Market Radar",
+  "lookback_days": 7,
+  "watchlist_only": false,
+  "min_companies_per_category": 5,
+  "max_companies_per_category": 10,
+  "min_source_urls": 5,
+  "prefer_startups": true,
+  "min_startups_per_category": 2,
+  "max_enterprises_per_category": 1,
+  "excluded_companies": ["네이버", "카카오", "쿠팡", "삼성", "LG", "SK", "KT", "신세계", "이마트", "11번가", "G마켓", "Salesforce"],
+  "categories": [
+    {
+      "id": "CAT-A",
+      "name": "기업·투자 인텔리전스",
+      "emoji": "🏢",
+      "description": "투자, M&A, 파트너십, 조직 개편, 글로벌 진출"
+    },
+    {
+      "id": "CAT-B",
+      "name": "세일즈 & 리드 생성",
+      "emoji": "🤝",
+      "description": "세일즈/리드 제품, 크롬 익스텐션, CRM 연동, GTM, 리드 생성"
+    },
+    {
+      "id": "CAT-C",
+      "name": "커머스 데이터 분석 기업",
+      "emoji": "🛍️",
+      "description": "커머스 데이터 분석/리서치, 셀러툴, 가격/리뷰/트렌드 데이터 인사이트"
+    },
+    {
+      "id": "CAT-D",
+      "name": "비정형·AI 기술 특화",
+      "emoji": "🧠",
+      "description": "LLM/생성형 AI, 검색/요약, OCR, 멀티모달, 특허, 비정형 데이터"
+    }
+  ],
+  "watchlist": [
+    {
+      "company": "딥서치",
+      "category_id": "CAT-A",
+      "keywords": ["투자", "파트너십", "STO", "증권사", "IR", "보도자료", "채용"]
+    },
+    {
+      "company": "아이템스카우트",
+      "category_id": "CAT-C",
+      "keywords": ["알리익스프레스", "기능", "업데이트", "데이터", "리포트", "채용"]
+    },
+    {
+      "company": "업스테이지",
+      "category_id": "CAT-D",
+      "keywords": ["OCR", "의료", "보험", "파트너십", "채용", "보도자료"]
+    }
+  ],
+  "email": {
+    "subject_prefix": "[Market Radar]"
+  }
+}
