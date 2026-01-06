@@ -23,6 +23,16 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
+          echo "ENV_B64_LEN=${#ENV_B64}"
+          echo "MARKET_RADER_SECRET_YML_LEN=${#MARKET_RADER_SECRET_YML}"
+          echo "GEMINI_API_KEY_LEN=${#GEMINI_API_KEY}"
+          if [ -n "$MARKET_RADER_SECRET_YML" ]; then
+            if printf "%s" "$MARKET_RADER_SECRET_YML" | grep -q 'GEMINI_API_KEY'; then
+              echo "MARKET_RADER_SECRET_YML_HAS_GEMINI_API_KEY=true"
+            else
+              echo "MARKET_RADER_SECRET_YML_HAS_GEMINI_API_KEY=false"
+            fi
+          fi
           if [ -z "$ENV_B64" ] && [ -z "$MARKET_RADER_SECRET_YML" ] && [ -z "$GEMINI_API_KEY" ]; then
             echo "Missing configuration:"
             echo "- Set either Secrets.ENV_B64 (base64 of full .env) OR Secrets.MARKET_RADER_SECRET_YML (yaml/.env content) OR Secrets.GEMINI_API_KEY (+ SMTP secrets)."
@@ -31,7 +41,7 @@ jobs:
       - name: Install
         run: npm ci
       - name: Run report (ENV_B64)
-        if: ${{ secrets.ENV_B64 != '' }}
+        if: env.ENV_B64 != ''
         run: |
           printf "%s" "$ENV_B64" | base64 --decode > .env
           if ! grep -qE '^GEMINI_API_KEY=.+$' .env; then
@@ -41,7 +51,7 @@ jobs:
           npm run report
 
       - name: Run report (MARKET_RADER_SECRET_YML)
-        if: ${{ secrets.ENV_B64 == '' && secrets.MARKET_RADER_SECRET_YML != '' }}
+        if: env.ENV_B64 == '' && env.MARKET_RADER_SECRET_YML != ''
         shell: bash
         run: |
           set -euo pipefail
@@ -100,7 +110,7 @@ jobs:
           npm run report
 
       - name: Run report (secrets)
-        if: ${{ secrets.ENV_B64 == '' && secrets.MARKET_RADER_SECRET_YML == '' }}
+        if: env.ENV_B64 == '' && env.MARKET_RADER_SECRET_YML == ''
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ secrets.GEMINI_MODEL || 'gemini-2.5-flash' }}
