@@ -1,4 +1,73 @@
+import { parse as dotenvParse } from "dotenv";
 import { z } from "zod";
+
+function isBlank(value: unknown): boolean {
+  return typeof value !== "string" || value.trim().length === 0;
+}
+
+function tryDecodeBase64(input: string): string | null {
+  const compact = input.replace(/\s+/g, "");
+  if (!compact) return null;
+  if (!/^[A-Za-z0-9+/=]+$/.test(compact)) return null;
+  if (compact.length % 4 !== 0) return null;
+  try {
+    const decoded = Buffer.from(compact, "base64").toString("utf8");
+    if (decoded.includes("GEMINI_API_KEY") || decoded.includes("SMTP_HOST") || decoded.includes("MAIL_TO")) {
+      return decoded;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function parseSimpleYamlMapping(raw: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  const lines = raw.replace(/\r/g, "").split("\n");
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const match = /^([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.*)$/.exec(trimmed);
+    if (!match) continue;
+    const key = match[1];
+    let value = match[2] ?? "";
+    if (value === "|") continue;
+    value = value.replace(/^['"]/, "").replace(/['"]$/, "");
+    result[key] = value;
+  }
+  return result;
+}
+
+function hydrateEnvFromSecrets(): void {
+  if (!isBlank(process.env.GEMINI_API_KEY)) return;
+
+  const candidates: Array<{ name: string; raw: string }> = [];
+  if (typeof process.env.ENV_B64 === "string" && process.env.ENV_B64.trim()) {
+    candidates.push({ name: "ENV_B64", raw: process.env.ENV_B64 });
+  }
+  if (typeof process.env.MARKET_RADER_SECRET_YML === "string" && process.env.MARKET_RADER_SECRET_YML.trim()) {
+    candidates.push({ name: "MARKET_RADER_SECRET_YML", raw: process.env.MARKET_RADER_SECRET_YML });
+  }
+
+  for (const c of candidates) {
+    const decoded = tryDecodeBase64(c.raw);
+    const raw = decoded ?? c.raw;
+    let parsed: Record<string, string> = {};
+    try {
+      parsed = dotenvParse(raw);
+    } catch {
+      parsed = parseSimpleYamlMapping(raw);
+    }
+
+    for (const [key, value] of Object.entries(parsed)) {
+      if (isBlank(process.env[key]) && typeof value === "string" && value.trim()) {
+        process.env[key] = value.trim();
+      }
+    }
+
+    if (!isBlank(process.env.GEMINI_API_KEY)) return;
+  }
+}
 
 const GeminiEnvSchema = z.object({
   GEMINI_API_KEY: z.string().min(1),
@@ -31,9 +100,11 @@ export type GeminiEnv = z.infer<typeof GeminiEnvSchema>;
 export type MailEnv = z.infer<typeof MailEnvSchema>;
 
 export function loadGeminiEnv(): GeminiEnv {
+  hydrateEnvFromSecrets();
   return GeminiEnvSchema.parse(process.env);
 }
 
 export function loadMailEnv(): MailEnv {
+  hydrateEnvFromSecrets();
   return MailEnvSchema.parse(process.env);
 }

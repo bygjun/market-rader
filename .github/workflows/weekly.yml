@@ -31,13 +31,17 @@ jobs:
       - name: Install
         run: npm ci
       - name: Run report (ENV_B64)
-        if: env.ENV_B64 != ''
+        if: ${{ secrets.ENV_B64 != '' }}
         run: |
           printf "%s" "$ENV_B64" | base64 --decode > .env
+          if ! grep -qE '^GEMINI_API_KEY=.+$' .env; then
+            echo "ENV_B64 decoded, but GEMINI_API_KEY is missing/empty in .env"
+            exit 1
+          fi
           npm run report
 
       - name: Run report (MARKET_RADER_SECRET_YML)
-        if: env.ENV_B64 == '' && env.MARKET_RADER_SECRET_YML != ''
+        if: ${{ secrets.ENV_B64 == '' && secrets.MARKET_RADER_SECRET_YML != '' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -51,10 +55,19 @@ jobs:
             fi
           fi
 
+          if ! printf "%s" "$raw" | grep -q 'GEMINI_API_KEY'; then
+            echo "MARKET_RADER_SECRET_YML does not contain GEMINI_API_KEY. Provide either dotenv lines (GEMINI_API_KEY=...) or YAML (GEMINI_API_KEY: ...)."
+            exit 1
+          fi
+
           # If it's already dotenv format, write as-is.
           first_nonempty="$(printf "%s\n" "$raw" | sed -e 's/\r$//' | sed -n '/^[[:space:]]*#/d;/^[[:space:]]*$/d;p' | head -n 1 || true)"
           if printf "%s" "$first_nonempty" | grep -q '='; then
             printf "%s\n" "$raw" > .env
+            if ! grep -qE '^GEMINI_API_KEY=.+$' .env; then
+              echo "MARKET_RADER_SECRET_YML dotenv detected, but GEMINI_API_KEY is missing/empty"
+              exit 1
+            fi
             npm run report
             exit 0
           fi
@@ -79,10 +92,15 @@ jobs:
             }
           ' > .env
 
+          if ! grep -qE '^GEMINI_API_KEY=.+$' .env; then
+            echo "MARKET_RADER_SECRET_YML YAML parsed, but GEMINI_API_KEY is missing/empty"
+            exit 1
+          fi
+
           npm run report
 
       - name: Run report (secrets)
-        if: env.ENV_B64 == '' && env.MARKET_RADER_SECRET_YML == ''
+        if: ${{ secrets.ENV_B64 == '' && secrets.MARKET_RADER_SECRET_YML == '' }}
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ secrets.GEMINI_MODEL || 'gemini-2.5-flash' }}
