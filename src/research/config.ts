@@ -14,6 +14,11 @@ export const ResearchConfigSchema = z.object({
   min_startups_per_category: z.number().int().min(0).max(20).default(2),
   max_enterprises_per_category: z.number().int().min(0).max(20).default(1),
   excluded_companies: z.array(z.string().min(1)).default([]),
+  verify_source_urls: z.boolean().default(false),
+  drop_items_without_valid_url: z.boolean().default(true),
+  max_source_repair_rounds: z.number().int().min(0).max(3).default(1),
+  url_check_timeout_ms: z.number().int().min(1000).max(30000).default(8000),
+  url_check_concurrency: z.number().int().min(1).max(20).default(6),
   categories: z
     .array(
       z.object({

@@ -2,20 +2,41 @@ import { z } from "zod";
 
 export const CategoryId = z.enum(["CAT-A", "CAT-B", "CAT-C", "CAT-D"]);
 
+function coerceOptionalUrl(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  let s = value.trim();
+  if (!s) return undefined;
+  s = s.replace(/^[<[(\s]+/, "").replace(/[>\])\s]+$/, "");
+  if (!s) return undefined;
+  if (!/^https?:\/\//i.test(s)) {
+    if (s.startsWith("www.")) s = `https://${s}`;
+    else return undefined;
+  }
+  try {
+    // eslint-disable-next-line no-new
+    new URL(s);
+    return s;
+  } catch {
+    return undefined;
+  }
+}
+
+const OptionalUrl = z.preprocess(coerceOptionalUrl, z.string().url().optional());
+
 export const HighlightSchema = z.object({
   company: z.string().min(1),
   category: CategoryId,
   title: z.string().min(1),
   insight: z.string().min(1),
   importance_score: z.number().int().min(1).max(5),
-  link: z.string().url().optional(),
+  link: OptionalUrl,
 });
 
 export const CategoryUpdateSchema = z.object({
   company: z.string().min(1),
   tag: z.string().min(1),
   title: z.string().min(1),
-  url: z.string().url().optional(),
+  url: OptionalUrl,
   insight: z.string().min(1).optional(),
 });
 
@@ -23,7 +44,7 @@ export const HiringSignalSchema = z.object({
   company: z.string().min(1),
   position: z.string().min(1),
   strategic_inference: z.string().min(1),
-  url: z.string().url().optional(),
+  url: OptionalUrl,
 });
 
 const ActionItemSchema = z.preprocess((value) => {

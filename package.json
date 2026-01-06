@@ -19,6 +19,7 @@
     "commander": "^14.0.2",
     "dotenv": "^17.2.3",
     "fast-xml-parser": "^5.3.3",
+    "jsonrepair": "^3.13.1",
     "marked": "^17.0.1",
     "nodemailer": "^7.0.12",
     "pino": "^10.1.0",

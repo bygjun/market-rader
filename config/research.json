@@ -10,6 +10,11 @@
   "min_startups_per_category": 2,
   "max_enterprises_per_category": 1,
   "excluded_companies": ["네이버", "카카오", "쿠팡", "삼성", "LG", "SK", "KT", "신세계", "이마트", "11번가", "G마켓", "Salesforce"],
+  "verify_source_urls": false,
+  "drop_items_without_valid_url": true,
+  "max_source_repair_rounds": 1,
+  "url_check_timeout_ms": 8000,
+  "url_check_concurrency": 6,
   "categories": [
     {
       "id": "CAT-A",

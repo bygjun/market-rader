@@ -1,15 +1,26 @@
 import { GoogleGenAI } from "@google/genai";
+import { jsonrepair } from "jsonrepair";
 import type { GeminiEnv } from "../lib/env.js";
 import { WeeklyReportSchema, type WeeklyReport } from "./schema.js";
 import { logger } from "../lib/logger.js";
 import { listModels, pickFallbackModel } from "./models.js";
+import { WeeklyReportJsonSchema } from "./reportJsonSchema.js";
+import { SourceListSchema, type SourceList } from "./sourcesSchema.js";
+
+function parseJsonLenient(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return JSON.parse(jsonrepair(text));
+  }
+}
 
 function extractFirstJson(text: string): unknown {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
   if (start === -1 || end === -1 || end <= start) return null;
   const sliced = text.slice(start, end + 1);
-  return JSON.parse(sliced);
+  return parseJsonLenient(sliced);
 }
 
 async function repairToValidJson(args: {
@@ -38,116 +49,8 @@ async function repairToValidJson(args: {
   });
 
   const text = repaired.text ?? "";
-  return JSON.parse(text);
+  return parseJsonLenient(text);
 }
-
-const WeeklyReportJsonSchema = {
-  type: "object",
-  additionalProperties: true,
-  required: ["report_date", "week_number", "top_highlights", "category_updates", "hiring_signals", "action_items"],
-  properties: {
-    report_date: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
-    week_number: { type: "integer", minimum: 1, maximum: 53 },
-    top_highlights: {
-      type: "array",
-      items: {
-        type: "object",
-        additionalProperties: true,
-        required: ["company", "category", "title", "insight", "importance_score"],
-        properties: {
-          company: { type: "string" },
-          category: { type: "string", enum: ["CAT-A", "CAT-B", "CAT-C", "CAT-D"] },
-          title: { type: "string" },
-          insight: { type: "string" },
-          importance_score: { type: "integer", minimum: 1, maximum: 5 },
-          link: { type: "string" },
-        },
-      },
-    },
-    category_updates: {
-      type: "object",
-      additionalProperties: true,
-      required: ["CAT-A", "CAT-B", "CAT-C", "CAT-D"],
-      properties: {
-        "CAT-A": {
-          type: "array",
-          items: {
-            type: "object",
-            additionalProperties: true,
-            required: ["company", "tag", "title"],
-            properties: {
-              company: { type: "string" },
-              tag: { type: "string" },
-              title: { type: "string" },
-              url: { type: "string" },
-              insight: { type: "string" },
-            },
-          },
-        },
-        "CAT-B": {
-          type: "array",
-          items: {
-            type: "object",
-            additionalProperties: true,
-            required: ["company", "tag", "title"],
-            properties: {
-              company: { type: "string" },
-              tag: { type: "string" },
-              title: { type: "string" },
-              url: { type: "string" },
-              insight: { type: "string" },
-            },
-          },
-        },
-        "CAT-C": {
-          type: "array",
-          items: {
-            type: "object",
-            additionalProperties: true,
-            required: ["company", "tag", "title"],
-            properties: {
-              company: { type: "string" },
-              tag: { type: "string" },
-              title: { type: "string" },
-              url: { type: "string" },
-              insight: { type: "string" },
-            },
-          },
-        },
-        "CAT-D": {
-          type: "array",
-          items: {
-            type: "object",
-            additionalProperties: true,
-            required: ["company", "tag", "title"],
-            properties: {
-              company: { type: "string" },
-              tag: { type: "string" },
-              title: { type: "string" },
-              url: { type: "string" },
-              insight: { type: "string" },
-            },
-          },
-        },
-      },
-    },
-    hiring_signals: {
-      type: "array",
-      items: {
-        type: "object",
-        additionalProperties: true,
-        required: ["company", "position", "strategic_inference"],
-        properties: {
-          company: { type: "string" },
-          position: { type: "string" },
-          strategic_inference: { type: "string" },
-          url: { type: "string" },
-        },
-      },
-    },
-    action_items: { type: "array", items: { type: "string" } },
-  },
-} as const;
 
 function normalizeRootJson(value: unknown): unknown {
   if (!Array.isArray(value)) return value;
@@ -178,10 +81,163 @@ function countSourceUrls(report: WeeklyReport): number {
   return urls.size;
 }
 
+function normalizeUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    u.hash = "";
+    for (const key of Array.from(u.searchParams.keys())) {
+      if (key.toLowerCase().startsWith("utm_")) u.searchParams.delete(key);
+    }
+    if (!u.searchParams.toString()) u.search = "";
+    // normalize trailing slash (keep root)
+    if (u.pathname.length > 1) u.pathname = u.pathname.replace(/\/+$/, "");
+    return u.toString();
+  } catch {
+    return url.trim();
+  }
+}
+
+function extractGroundedUrls(result: Awaited<ReturnType<GoogleGenAI["models"]["generateContent"]>>): string[] {
+  const chunks = result?.candidates?.[0]?.groundingMetadata?.groundingChunks ?? [];
+  const urls: string[] = [];
+  for (const c of chunks) {
+    const uri = c?.web?.uri;
+    if (typeof uri === "string" && uri.startsWith("http")) urls.push(uri);
+  }
+  return urls;
+}
+
+function filterSourcesToGrounding(sources: SourceList, groundedUrls: string[]): SourceList {
+  const allowed = new Set(groundedUrls.map(normalizeUrl));
+  const filtered = sources.sources.filter((s) => allowed.has(normalizeUrl(s.url)));
+  return { sources: filtered };
+}
+
+function enforceAllowedUrlsOnReport(report: WeeklyReport, allowedUrls: string[]): WeeklyReport {
+  const allowed = new Set(allowedUrls.map(normalizeUrl));
+  const copy: WeeklyReport = JSON.parse(JSON.stringify(report));
+
+  copy.top_highlights = copy.top_highlights
+    .map((h) => {
+      if (h.link && !allowed.has(normalizeUrl(h.link))) h.link = undefined;
+      return h;
+    })
+    .filter((h) => !h.link || allowed.has(normalizeUrl(h.link)));
+
+  for (const cat of Object.keys(copy.category_updates) as Array<keyof WeeklyReport["category_updates"]>) {
+    copy.category_updates[cat] = copy.category_updates[cat]
+      .map((u) => {
+        if (u.url && !allowed.has(normalizeUrl(u.url))) u.url = undefined;
+        return u;
+      })
+      .filter((u) => !u.url || allowed.has(normalizeUrl(u.url)));
+  }
+
+  copy.hiring_signals = copy.hiring_signals
+    .map((h) => {
+      if (h.url && !allowed.has(normalizeUrl(h.url))) h.url = undefined;
+      return h;
+    })
+    .filter((h) => !h.url || allowed.has(normalizeUrl(h.url)));
+
+  return WeeklyReportSchema.parse(copy);
+}
+
+async function selectModelOrFallback(args: {
+  env: GeminiEnv;
+  ai: GoogleGenAI;
+  model: string;
+  run: (modelName: string) => Promise<Awaited<ReturnType<GoogleGenAI["models"]["generateContent"]>>>;
+}): Promise<{ modelUsed: string; result: Awaited<ReturnType<GoogleGenAI["models"]["generateContent"]>> }> {
+  try {
+    const result = await args.run(args.model);
+    return { modelUsed: args.model, result };
+  } catch (err) {
+    const e = err as { status?: number; message?: string };
+    const isNotFound =
+      e?.status === 404 ||
+      (typeof e?.message === "string" &&
+        (e.message.includes("is not found") || e.message.includes("not supported for generateContent")));
+    if (!isNotFound) throw err;
+
+    logger.warn({ model: args.model, err }, "Requested model unavailable; attempting fallback via ListModels");
+    const models = await listModels(args.env.GEMINI_API_KEY);
+    const fallback = pickFallbackModel(models);
+    if (!fallback) throw err;
+
+    logger.warn({ fallback }, "Retrying with fallback model");
+    const result = await args.run(fallback);
+    return { modelUsed: fallback, result };
+  }
+}
+
+export async function generateSourceList(args: {
+  env: GeminiEnv;
+  prompt: string;
+}): Promise<{ sources: SourceList; meta: { model: string; groundedUrls: string[]; tool: string } }> {
+  const ai = new GoogleGenAI({ apiKey: args.env.GEMINI_API_KEY });
+
+  const run = async (modelName: string) => {
+    return ai.models.generateContent({
+      model: modelName,
+      contents: args.prompt,
+      config: {
+        tools: [{ googleSearch: {} }],
+        temperature: 0.2,
+        maxOutputTokens: 6000,
+        responseMimeType: "application/json",
+      },
+    });
+  };
+
+  const { modelUsed, result } = await selectModelOrFallback({ env: args.env, ai, model: args.env.GEMINI_MODEL, run });
+
+  const groundedUrls = extractGroundedUrls(result);
+  const text = result.text ?? "";
+  const parsed = parseJsonLenient(text);
+  const sources = SourceListSchema.parse(parsed);
+  const filtered = groundedUrls.length ? filterSourcesToGrounding(sources, groundedUrls) : sources;
+
+  logger.info(
+    { model: modelUsed, groundedUrls: groundedUrls.length, sources: sources.sources.length, kept: filtered.sources.length },
+    "Collected sources",
+  );
+
+  return { sources: filtered, meta: { model: modelUsed, groundedUrls, tool: "googleSearch" } };
+}
+
+export async function generateWeeklyReportFromSources(args: {
+  env: GeminiEnv;
+  prompt: string;
+  allowedUrls: string[];
+}): Promise<{ report: WeeklyReport; meta: { model: string } }> {
+  const ai = new GoogleGenAI({ apiKey: args.env.GEMINI_API_KEY });
+
+  const run = async (modelName: string) => {
+    return ai.models.generateContent({
+      model: modelName,
+      contents: args.prompt,
+      config: {
+        temperature: 0.2,
+        maxOutputTokens: 6000,
+        responseMimeType: "application/json",
+        responseJsonSchema: WeeklyReportJsonSchema,
+      },
+    });
+  };
+
+  const { modelUsed, result } = await selectModelOrFallback({ env: args.env, ai, model: args.env.GEMINI_MODEL, run });
+  const text = result.text ?? "";
+  const parsed = parseJsonLenient(text);
+  const reportRaw = WeeklyReportSchema.parse(normalizeRootJson(parsed));
+  const report = enforceAllowedUrlsOnReport(reportRaw, args.allowedUrls);
+  return { report, meta: { model: modelUsed } };
+}
+
 export async function generateWeeklyReport(args: {
   env: GeminiEnv;
   prompt: string;
-}): Promise<WeeklyReport> {
+}): Promise<{ report: WeeklyReport; meta: { model: string; tool: string; groundingChunks: number; urlCount: number } }> {
   const ai = new GoogleGenAI({ apiKey: args.env.GEMINI_API_KEY });
   const systemInstruction =
     "You are rigorous about sources. Prefer official pages and reputable news. Always include links when possible.";
@@ -201,7 +257,7 @@ export async function generateWeeklyReport(args: {
         tools,
         systemInstruction,
         temperature: 0.2,
-        maxOutputTokens: 65536,
+        maxOutputTokens: 6000,
         responseMimeType: "application/json",
         responseJsonSchema: WeeklyReportJsonSchema,
       },
@@ -256,10 +312,7 @@ export async function generateWeeklyReport(args: {
 
       if (!isNotFound) throw err;
 
-      logger.warn(
-        { model: modelUsed, err },
-        "Requested model unavailable; attempting fallback via ListModels",
-      );
+      logger.warn({ model: modelUsed, err }, "Requested model unavailable; attempting fallback via ListModels");
       const models = await listModels(args.env.GEMINI_API_KEY);
       const fallback = pickFallbackModel(models);
       if (!fallback) throw err;
@@ -274,7 +327,7 @@ export async function generateWeeklyReport(args: {
     const text = result?.text ?? "";
     let parsed: unknown;
     try {
-      parsed = JSON.parse(text);
+      parsed = parseJsonLenient(text);
     } catch (err) {
       logger.warn({ err }, "JSON parse failed; attempting recovery");
       try {
@@ -298,12 +351,15 @@ export async function generateWeeklyReport(args: {
         { model: modelUsed, tool: responseTool, groundingChunks: groundingChunks.length, urlCount },
         "Grounded search references attached",
       );
-      return report;
+      return {
+        report,
+        meta: { model: modelUsed, tool: responseTool, groundingChunks: groundingChunks.length, urlCount },
+      };
     }
 
     if (!args.env.REQUIRE_GROUNDING) {
       logger.warn({ model: modelUsed, tool: responseTool, urlCount }, "Grounding metadata missing; proceeding");
-      return report;
+      return { report, meta: { model: modelUsed, tool: responseTool, groundingChunks: 0, urlCount } };
     }
 
     if (urlCount >= 1) {
@@ -311,8 +367,8 @@ export async function generateWeeklyReport(args: {
         { model: modelUsed, tool: responseTool, urlCount },
         "Grounding metadata missing, but source URLs are present; proceeding",
       );
-      return report;
-    }
+      return { report, meta: { model: modelUsed, tool: responseTool, groundingChunks: 0, urlCount } };
+  }
 
     if (attempt < maxAttempts) {
       logger.warn({ model: modelUsed, tool: responseTool }, "No grounding/urls; retrying with stronger instructions");

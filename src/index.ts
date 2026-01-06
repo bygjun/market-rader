@@ -7,9 +7,10 @@ import { loadGeminiEnv, loadMailEnv } from "./lib/env.js";
 import { logger } from "./lib/logger.js";
 import { getIsoDateInTimeZone, getWeekNumberInTimeZone } from "./lib/date.js";
 import { loadResearchConfig } from "./research/config.js";
-import { buildWeeklyPrompt } from "./research/prompt.js";
-import { generateWeeklyReport } from "./research/gemini.js";
+import { buildReportFromSourcesPrompt, buildSourcesPrompt, buildWeeklyPrompt } from "./research/prompt.js";
+import { generateSourceList, generateWeeklyReport, generateWeeklyReportFromSources } from "./research/gemini.js";
 import { WeeklyReportSchema } from "./research/schema.js";
+import { postprocessReport } from "./research/postprocess.js";
 import { renderHtmlFromMarkdown, renderMarkdown } from "./email/render.js";
 import { sendEmail } from "./email/mailer.js";
 
@@ -33,6 +34,7 @@ async function main(): Promise<void> {
   const now = new Date();
   let report = null as unknown;
   let subjectPrefix = researchConfig.email?.subject_prefix ?? process.env.MAIL_SUBJECT_PREFIX ?? "[Market Radar]";
+  let modelUsed = process.env.GEMINI_MODEL ?? "unknown";
 
   if (opts.inputReport) {
     const raw = await readFile(opts.inputReport, "utf8");
@@ -47,8 +49,36 @@ async function main(): Promise<void> {
     const baseDate = opts.asOf ? new Date(`${opts.asOf}T00:00:00.000Z`) : now;
     const reportDate = getIsoDateInTimeZone(baseDate, timeZone);
     const weekNumber = getWeekNumberInTimeZone(baseDate, timeZone);
-    const prompt = buildWeeklyPrompt({ reportDate, weekNumber, config: researchConfig });
-    report = await generateWeeklyReport({ env: geminiEnv, prompt });
+    const sourcesPrompt = buildSourcesPrompt({ reportDate, weekNumber, config: researchConfig });
+    const sourcesResult = await generateSourceList({ env: geminiEnv, prompt: sourcesPrompt });
+    const allowedUrls = sourcesResult.sources.sources.map((s) => s.url);
+
+    if (allowedUrls.length >= 3) {
+      const reportPrompt = buildReportFromSourcesPrompt({
+        reportDate,
+        weekNumber,
+        config: researchConfig,
+        sourcesJson: JSON.stringify(sourcesResult.sources),
+        allowedUrls,
+      });
+      const generated = await generateWeeklyReportFromSources({ env: geminiEnv, prompt: reportPrompt, allowedUrls });
+      report = generated.report;
+      modelUsed = generated.meta.model;
+    } else {
+      // Fallback to one-shot if grounding metadata is missing or too few sources were captured.
+      const prompt = buildWeeklyPrompt({ reportDate, weekNumber, config: researchConfig });
+      const generated = await generateWeeklyReport({ env: geminiEnv, prompt });
+      report = generated.report;
+      modelUsed = generated.meta.model;
+    }
+
+    // Optional postprocess (URL status check) can be enabled in config; default can be false.
+    report = await postprocessReport({
+      env: geminiEnv,
+      modelUsed,
+      report: WeeklyReportSchema.parse(report),
+      config: researchConfig,
+    });
   }
 
   const parsedReport = WeeklyReportSchema.parse(report);
@@ -64,7 +94,7 @@ async function main(): Promise<void> {
   await writeFile("out/email.html", html, "utf8");
 
   if (opts.dryRun) {
-    logger.info({ subject }, "Dry-run complete (no email sent)");
+    logger.info({ subject, modelUsed }, "Dry-run complete (no email sent)");
     return;
   }
 
