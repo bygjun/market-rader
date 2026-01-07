@@ -10,6 +10,7 @@ jobs:
   run:
     runs-on: ubuntu-latest
     env:
+      TZ: Asia/Seoul
       ENV_B64: ${{ secrets.ENV_B64 }}
       MARKET_RADER_SECRET_YML: ${{ secrets.MARKET_RADER_SECRET_YML }}
     steps:

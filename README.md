@@ -63,7 +63,7 @@ npm run report -- --dry-run --input-report config/sample-report.json
 
 ## GitHub Actions (매일 실행)
 
-`.github/workflows/weekly.yml` 사용.
+`.github/workflows/daily.yml` 사용.
 
 필수 Secrets:
 - `GEMINI_API_KEY`
