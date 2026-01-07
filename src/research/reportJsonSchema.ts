@@ -1,7 +1,15 @@
 export const WeeklyReportJsonSchema = {
   type: "object",
   additionalProperties: true,
-  required: ["report_date", "week_number", "top_highlights", "category_updates", "hiring_signals", "action_items"],
+  required: [
+    "report_date",
+    "week_number",
+    "top_highlights",
+    "category_updates",
+    "overseas_competitor_updates",
+    "hiring_signals",
+    "action_items",
+  ],
   properties: {
     report_date: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
     week_number: { type: "integer", minimum: 1, maximum: 53 },
@@ -89,6 +97,22 @@ export const WeeklyReportJsonSchema = {
               insight: { type: "string" },
             },
           },
+        },
+      },
+    },
+    overseas_competitor_updates: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: true,
+        required: ["company", "tag", "title"],
+        properties: {
+          company: { type: "string" },
+          country: { type: "string" },
+          tag: { type: "string" },
+          title: { type: "string" },
+          url: { type: "string" },
+          insight: { type: "string" },
         },
       },
     },

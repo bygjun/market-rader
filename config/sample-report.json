@@ -41,6 +41,16 @@
     ],
     "CAT-D": []
   },
+  "overseas_competitor_updates": [
+    {
+      "company": "Similarweb",
+      "country": "Israel",
+      "tag": "Product",
+      "title": "리테일/커머스 인사이트 리포트 기능 업데이트",
+      "url": "https://example.com/global",
+      "insight": "글로벌 데이터 기반 인사이트 경쟁이 심화. 데이터 소스/리포팅 UX 차별화 포인트 점검 필요."
+    }
+  ],
   "hiring_signals": [
     {
       "company": "리캐치",

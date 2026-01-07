@@ -95,6 +95,7 @@ async function main(): Promise<void> {
         new Set([
           ...generated.report.top_highlights.map((h) => h.company),
           ...Object.values(generated.report.category_updates).flat().map((u) => u.company),
+          ...(generated.report.overseas_competitor_updates ?? []).map((u) => u.company),
           ...generated.report.hiring_signals.map((h) => h.company),
         ]),
       ).slice(0, 50);

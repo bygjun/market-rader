@@ -40,6 +40,15 @@ export const CategoryUpdateSchema = z.object({
   insight: z.string().min(1).optional(),
 });
 
+export const OverseasCompetitorUpdateSchema = z.object({
+  company: z.string().min(1),
+  country: z.string().min(1).optional(),
+  tag: z.string().min(1),
+  title: z.string().min(1),
+  url: OptionalUrl,
+  insight: z.string().min(1).optional(),
+});
+
 export const HiringSignalSchema = z.object({
   company: z.string().min(1),
   position: z.string().min(1),
@@ -90,6 +99,7 @@ export const WeeklyReportSchema = z.object({
       "CAT-C": [],
       "CAT-D": [],
     }),
+  overseas_competitor_updates: z.array(OverseasCompetitorUpdateSchema).default([]),
   hiring_signals: z.array(HiringSignalSchema).default([]),
   action_items: z.array(ActionItemSchema).default([]),
 });

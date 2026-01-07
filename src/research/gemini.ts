@@ -76,6 +76,9 @@ function countSourceUrls(report: WeeklyReport): number {
       if (u.url) urls.add(u.url);
     }
   }
+  for (const u of report.overseas_competitor_updates ?? []) {
+    if (u.url) urls.add(u.url);
+  }
   for (const h of report.hiring_signals) {
     if (h.url) urls.add(h.url);
   }
@@ -127,6 +130,13 @@ function enforceAllowedUrlsOnReport(report: WeeklyReport, allowedUrls: string[])
       })
       .filter((u) => !u.url || allowed.has(normalizeUrl(u.url)));
   }
+
+  copy.overseas_competitor_updates = (copy.overseas_competitor_updates ?? [])
+    .map((u) => {
+      if (u.url && !allowed.has(normalizeUrl(u.url))) u.url = undefined;
+      return u;
+    })
+    .filter((u) => !u.url || allowed.has(normalizeUrl(u.url)));
 
   copy.hiring_signals = copy.hiring_signals
     .map((h) => {

@@ -31,6 +31,7 @@ export function collectReportUrls(report: WeeklyReport): string[] {
   for (const updates of Object.values(report.category_updates)) {
     for (const u of updates) if (u.url) urls.push(u.url);
   }
+  for (const u of report.overseas_competitor_updates ?? []) if (u.url) urls.push(u.url);
   for (const h of report.hiring_signals) if (h.url) urls.push(h.url);
   return urls;
 }
@@ -47,6 +48,10 @@ export function applyUrlReplacements(report: WeeklyReport, replacements: Map<str
       return u;
     });
   }
+  copy.overseas_competitor_updates = (copy.overseas_competitor_updates ?? []).map((u) => {
+    if (u.url && replacements.has(u.url)) u.url = replacements.get(u.url)!;
+    return u;
+  });
   for (const h of copy.hiring_signals) {
     if (h.url && replacements.has(h.url)) h.url = replacements.get(h.url)!;
   }
@@ -65,6 +70,7 @@ export function dropItemsWithBadUrls(args: {
   for (const cat of Object.keys(copy.category_updates) as Array<keyof WeeklyReport["category_updates"]>) {
     copy.category_updates[cat] = copy.category_updates[cat].filter((u) => !u.url || !badUrls.has(u.url));
   }
+  copy.overseas_competitor_updates = (copy.overseas_competitor_updates ?? []).filter((u) => !u.url || !badUrls.has(u.url));
   copy.hiring_signals = copy.hiring_signals.filter((h) => !h.url || !badUrls.has(h.url));
 
   return WeeklyReportSchema.parse(copy);

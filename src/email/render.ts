@@ -59,8 +59,23 @@ export function renderMarkdown(report: WeeklyReport, config: ResearchConfig): st
     lines.push("");
   }
 
+  let section = 3;
+
+  if (report.overseas_competitor_updates?.length) {
+    lines.push(`## ${section}) 해외 경쟁사 동향 (Global Competitors)`);
+    for (const u of report.overseas_competitor_updates) {
+      const company = companyLabel(report, u.company);
+      const country = u.country ? ` (${u.country})` : "";
+      const source = u.url ? ` ([출처](${u.url}))` : "";
+      lines.push(`- \`[${u.tag}]\` **${company}${country}:** ${u.title}${source}`);
+      if (u.insight) lines.push(`  - Insight: ${u.insight}`);
+    }
+    lines.push("");
+    section += 1;
+  }
+
   if (report.hiring_signals.length) {
-    lines.push("## 3) 채용으로 보는 기술 신호 (Talent & Tech Signals)");
+    lines.push(`## ${section}) 채용으로 보는 기술 신호 (Talent & Tech Signals)`);
     lines.push("| 기업명 | 채용 직무 | 우리의 해석 (Hidden Strategy) |");
     lines.push("| :--- | :--- | :--- |");
     for (const h of report.hiring_signals) {
@@ -69,10 +84,11 @@ export function renderMarkdown(report: WeeklyReport, config: ResearchConfig): st
       lines.push(`| ${company} | ${position} | ${h.strategic_inference} |`);
     }
     lines.push("");
+    section += 1;
   }
 
   if (report.action_items.length) {
-    lines.push("## 4) 우리의 대응 (Action Items)");
+    lines.push(`## ${section}) 우리의 대응 (Action Items)`);
     for (const a of report.action_items) lines.push(`- ${a}`);
     lines.push("");
   }

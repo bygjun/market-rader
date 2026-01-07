@@ -23,6 +23,7 @@ cp .env.example .env
 - `prefer_startups`, `min_startups_per_category`, `excluded_companies`로 대기업 편향을 줄이고 스타트업/스케일업 위주로 구성할 수 있습니다.
 - 링크 환각 방지를 위해 기본적으로 2단계로 동작합니다: (1) grounded search로 소스 URL 목록 수집 → (2) 그 URL만 사용해 리포트 작성. (소스가 0개면 1단계 재시도/설정 조정이 필요할 수 있습니다)
 - 메일에서 회사명은 가능하면 공식 홈페이지로 링크됩니다(출처 링크는 별도로 표기).
+- 리포트에는 `overseas_competitor_updates`(해외 경쟁사 동향) 섹션이 포함되며, 최근 업데이트가 없으면 빈 배열로 출력됩니다.
 - (선택) `verify_source_urls=true`로 켜면 HTTP 상태체크로 404 링크를 추가로 제거/수정합니다.
 
 ## 실행

@@ -51,6 +51,7 @@ export function buildWeeklyPrompt(args: {
     `- Identify meaningful updates per company; if none, omit.`,
     `- For each update: include a short title, a tag like "투자/제휴/기능/채용/특허/가격/글로벌" etc.`,
     `- Provide an "insight" that explains strategic meaning (Insight First).`,
+    `- Also include overseas_competitor_updates: recent updates from competitors headquartered outside Korea (3-8 items when possible). If a company's HQ country is unclear, omit it from overseas_competitor_updates. If watchlist_only=true, overseas_competitor_updates MUST only use watchlist companies and may be empty.`,
     `- Provide source links (url/link) for each item whenever possible. Prefer including an url; if you cannot find a credible source url, omit that item.`,
     `- NEVER fabricate URLs. Do not guess URL slugs. Only output URLs you actually found in web search results or official pages.`,
     config.min_source_urls > 0
@@ -61,7 +62,7 @@ export function buildWeeklyPrompt(args: {
     `- action_items MUST be an array of strings (not objects). Example: "기획팀: 알리익스프레스 지표 벤치마킹".`,
     ``,
     `Schema (keys must match exactly):`,
-    `{"report_date":"YYYY-MM-DD","week_number":2,"top_highlights":[{"company":"...","category":"CAT-A","title":"...","insight":"...","importance_score":5,"link":"https://..."}],"category_updates":{"CAT-A":[{"company":"...","tag":"...","title":"...","url":"https://...","insight":"..."}],"CAT-B":[],"CAT-C":[],"CAT-D":[]},"hiring_signals":[{"company":"...","position":"...","strategic_inference":"...","url":"https://..."}],"action_items":["..."]}`,
+    `{"report_date":"YYYY-MM-DD","week_number":2,"top_highlights":[{"company":"...","category":"CAT-A","title":"...","insight":"...","importance_score":5,"link":"https://..."}],"category_updates":{"CAT-A":[{"company":"...","tag":"...","title":"...","url":"https://...","insight":"..."}],"CAT-B":[],"CAT-C":[],"CAT-D":[]},"overseas_competitor_updates":[{"company":"...","country":"USA","tag":"...","title":"...","url":"https://...","insight":"..."}],"hiring_signals":[{"company":"...","position":"...","strategic_inference":"...","url":"https://..."}],"action_items":["..."]}`,
   ].join("\n");
 }
 
@@ -101,6 +102,7 @@ export function buildSourcesPrompt(args: {
     `Coverage rules:`,
     `- For EACH category, collect sources for at least ${config.min_companies_per_category} distinct companies when possible.`,
     `- Prefer startups/scale-ups over large enterprises.`,
+    `- Also try to include a small set of relevant overseas competitors (headquartered outside Korea) across categories when possible, without sacrificing category coverage.`,
     `- Exclude these companies unless absolutely necessary:`,
     excludedCompanies,
     config.watchlist_only
@@ -150,19 +152,20 @@ export function buildReportFromSourcesPrompt(args: {
     `Output requirements:`,
     `- For each included item, include a source link (url/link) from Allowed URLs exactly.`,
     `- Provide an "insight" that explains strategic meaning (Insight First).`,
+    `- Include overseas_competitor_updates: 3-8 items about competitors headquartered outside Korea (if clearly identifiable), using only Allowed URLs. If you cannot find suitable overseas items in the provided sources, return an empty array.`,
     `- importance_score: 1-5; pick top_highlights as the 3 most important items.`,
     `- Provide 3-6 action_items (array of strings).`,
     `- Do NOT include company_homepages here; it will be attached separately.`,
     ``,
     `Report schema (keys must match exactly):`,
-    `{"report_date":"YYYY-MM-DD","week_number":2,"company_homepages":{"회사명":"https://..."}, "top_highlights":[{"company":"...","category":"CAT-A","title":"...","insight":"...","importance_score":5,"link":"https://..."}],"category_updates":{"CAT-A":[{"company":"...","tag":"...","title":"...","url":"https://...","insight":"..."}],"CAT-B":[],"CAT-C":[],"CAT-D":[]},"hiring_signals":[{"company":"...","position":"...","strategic_inference":"...","url":"https://..."}],"action_items":["..."]}`,
+    `{"report_date":"YYYY-MM-DD","week_number":2,"company_homepages":{"회사명":"https://..."}, "top_highlights":[{"company":"...","category":"CAT-A","title":"...","insight":"...","importance_score":5,"link":"https://..."}],"category_updates":{"CAT-A":[{"company":"...","tag":"...","title":"...","url":"https://...","insight":"..."}],"CAT-B":[],"CAT-C":[],"CAT-D":[]},"overseas_competitor_updates":[{"company":"...","country":"USA","tag":"...","title":"...","url":"https://...","insight":"..."}],"hiring_signals":[{"company":"...","position":"...","strategic_inference":"...","url":"https://..."}],"action_items":["..."]}`,
   ].join("\n");
 }
 
 export function buildCompanyHomepagesPrompt(args: { lookbackDays: number; companies: string[] }): string {
   const companies = args.companies.map((c) => `- ${c}`).join("\n");
   return [
-    `You are collecting official company homepages in Korea.`,
+    `You are collecting official company homepages.`,
     `You MUST use grounded web search.`,
     `Return ONLY JSON, no markdown, no extra text.`,
     ``,
