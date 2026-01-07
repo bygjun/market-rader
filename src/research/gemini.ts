@@ -7,6 +7,8 @@ import { listModels, pickFallbackModel } from "./models.js";
 import { WeeklyReportJsonSchema } from "./reportJsonSchema.js";
 import { SourceListSchema, type SourceList } from "./sourcesSchema.js";
 import { CompanyHomepagesSchema, type CompanyHomepages } from "./homepagesSchema.js";
+import { CompanyHqSchema, type CompanyHq } from "./companyHqSchema.js";
+import { OverseasTranslateItemJsonSchema, OverseasTranslateJsonSchema } from "./overseasTranslateSchema.js";
 
 function parseJsonLenient(text: string): unknown {
   try {
@@ -66,6 +68,91 @@ function normalizeRootJson(value: unknown): unknown {
   return candidate ?? value[0];
 }
 
+function applyMissingFieldPlaceholders(raw: unknown): unknown {
+  if (!raw || typeof raw !== "object") return raw;
+  const copy = JSON.parse(JSON.stringify(raw)) as Record<string, unknown>;
+
+  const ensureString = (value: unknown, fallback: string): string => {
+    if (typeof value === "string") {
+      const s = value.trim();
+      return s ? s : fallback;
+    }
+    return fallback;
+  };
+
+  const ensureInt = (value: unknown, fallback: number): number => {
+    if (typeof value === "number" && Number.isFinite(value)) return Math.trunc(value);
+    return fallback;
+  };
+
+  // If a section is present but malformed, delete it so Zod defaults can apply.
+  if (copy.category_updates && (typeof copy.category_updates !== "object" || Array.isArray(copy.category_updates))) {
+    delete copy.category_updates;
+  }
+  if (copy.hiring_signals && !Array.isArray(copy.hiring_signals)) delete copy.hiring_signals;
+  if (copy.action_items && !Array.isArray(copy.action_items)) delete copy.action_items;
+  if (copy.company_homepages && (typeof copy.company_homepages !== "object" || Array.isArray(copy.company_homepages))) {
+    delete copy.company_homepages;
+  }
+  if (copy.overseas_competitor_updates && !Array.isArray(copy.overseas_competitor_updates)) {
+    delete copy.overseas_competitor_updates;
+  }
+
+  if (Array.isArray(copy.top_highlights)) {
+    copy.top_highlights = copy.top_highlights.map((h) => {
+      if (!h || typeof h !== "object") return h;
+      const obj = h as Record<string, unknown>;
+      obj.company = ensureString(obj.company, "(회사명 미상)");
+      obj.title = ensureString(obj.title, "(제목 없음)");
+      obj.insight = ensureString(obj.insight, "요약(Insight) 자동 생성 실패: 출처 링크를 확인하세요.");
+      obj.importance_score = ensureInt(obj.importance_score, 3);
+      return obj;
+    });
+  }
+
+  if (copy.category_updates && typeof copy.category_updates === "object" && !Array.isArray(copy.category_updates)) {
+    const cu = copy.category_updates as Record<string, unknown>;
+    for (const [cat, items] of Object.entries(cu)) {
+      if (!Array.isArray(items)) continue;
+      cu[cat] = items.map((u) => {
+        if (!u || typeof u !== "object") return u;
+        const obj = u as Record<string, unknown>;
+        obj.company = ensureString(obj.company, "(회사명 미상)");
+        obj.tag = ensureString(obj.tag, "Update");
+        obj.title = ensureString(obj.title, "(제목 없음)");
+        return obj;
+      });
+    }
+  }
+
+  if (Array.isArray(copy.overseas_competitor_updates)) {
+    copy.overseas_competitor_updates = copy.overseas_competitor_updates.map((u) => {
+      if (!u || typeof u !== "object") return u;
+      const obj = u as Record<string, unknown>;
+      obj.company = ensureString(obj.company, "(회사명 미상)");
+      obj.tag = ensureString(obj.tag, "Update");
+      obj.title = ensureString(obj.title, "(제목 없음)");
+      return obj;
+    });
+  }
+
+  if (Array.isArray(copy.hiring_signals)) {
+    copy.hiring_signals = copy.hiring_signals.map((h) => {
+      if (!h || typeof h !== "object") return h;
+      const obj = h as Record<string, unknown>;
+      obj.company = ensureString(obj.company, "(회사명 미상)");
+      obj.position = ensureString(obj.position, "(직무 미상)");
+      obj.strategic_inference = ensureString(
+        obj.strategic_inference,
+        "해석 자동 생성 실패: 출처 링크를 확인하세요.",
+      );
+      return obj;
+    });
+  }
+
+  return copy;
+}
+
 function countSourceUrls(report: WeeklyReport): number {
   const urls = new Set<string>();
   for (const h of report.top_highlights) {
@@ -99,6 +186,25 @@ function normalizeUrl(url: string): string {
   } catch {
     return url.trim();
   }
+}
+
+function hasHangul(s: string): boolean {
+  return /[\uAC00-\uD7AF]/.test(s);
+}
+
+function looksEnglishish(s: string): boolean {
+  if (!s) return false;
+  const trimmed = s.trim();
+  if (!trimmed) return false;
+  if (hasHangul(trimmed)) return false;
+  return /[A-Za-z]/.test(trimmed);
+}
+
+function needsOverseasKoreanTranslation(report: WeeklyReport): boolean {
+  const updates = report.overseas_competitor_updates ?? [];
+  return updates.some(
+    (u) => looksEnglishish(u.title) || looksEnglishish(u.tag) || (u.insight ? looksEnglishish(u.insight) : false),
+  );
 }
 
 function extractGroundedUrls(result: Awaited<ReturnType<GoogleGenAI["models"]["generateContent"]>>): string[] {
@@ -256,7 +362,9 @@ export async function generateWeeklyReportFromSources(args: {
 
     const repairedText = repaired.text ?? "";
     const repairedParsed = parseJsonLenient(repairedText);
-    const repairedReportRaw = WeeklyReportSchema.parse(normalizeRootJson(repairedParsed));
+    const normalized = normalizeRootJson(repairedParsed);
+    const softened = applyMissingFieldPlaceholders(normalized);
+    const repairedReportRaw = WeeklyReportSchema.parse(softened);
     return enforceAllowedUrlsOnReport(repairedReportRaw, args.allowedUrls);
   };
 
@@ -311,6 +419,240 @@ export async function generateCompanyHomepages(args: {
   const parsed = parseJsonLenient(text);
   const homepages = CompanyHomepagesSchema.parse(parsed);
   return { homepages, meta: { model: modelUsed } };
+}
+
+export async function generateCompanyHq(args: {
+  env: GeminiEnv;
+  prompt: string;
+}): Promise<{ hq: CompanyHq; meta: { model: string } }> {
+  const ai = new GoogleGenAI({ apiKey: args.env.GEMINI_API_KEY });
+
+  const run = async (modelName: string) => {
+    return ai.models.generateContent({
+      model: modelName,
+      contents: args.prompt,
+      config: {
+        tools: [{ googleSearch: {} }],
+        temperature: 0.2,
+        maxOutputTokens: 2000,
+        responseMimeType: "application/json",
+      },
+    });
+  };
+
+  const { modelUsed, result } = await selectModelOrFallback({ env: args.env, ai, model: args.env.GEMINI_MODEL, run });
+  const text = result.text ?? "";
+  const parsed = parseJsonLenient(text);
+  const hq = CompanyHqSchema.parse(parsed);
+  return { hq, meta: { model: modelUsed } };
+}
+
+export async function translateOverseasSectionToKorean(args: {
+  env: GeminiEnv;
+  report: WeeklyReport;
+}): Promise<{ report: WeeklyReport; meta: { model: string } }> {
+  if (!needsOverseasKoreanTranslation(args.report)) return { report: args.report, meta: { model: args.env.GEMINI_MODEL } };
+
+  const original = args.report.overseas_competitor_updates ?? [];
+  if (original.length === 0) return { report: args.report, meta: { model: args.env.GEMINI_MODEL } };
+
+  const needsItemTranslation = (u: NonNullable<WeeklyReport["overseas_competitor_updates"]>[number]): boolean => {
+    return (
+      looksEnglishish(u.tag) ||
+      looksEnglishish(u.title) ||
+      (u.insight ? looksEnglishish(u.insight) : false) ||
+      (u.country ? looksEnglishish(u.country) : false)
+    );
+  };
+
+  const indicesNeeding = original.map((u, i) => (needsItemTranslation(u) ? i : -1)).filter((i) => i >= 0);
+  if (indicesNeeding.length === 0) return { report: args.report, meta: { model: args.env.GEMINI_MODEL } };
+
+  const mergeTranslation = (
+    translated: WeeklyReport["overseas_competitor_updates"],
+  ): WeeklyReport["overseas_competitor_updates"] => {
+    if (!Array.isArray(translated) || translated.length !== original.length) return null;
+    const out: NonNullable<WeeklyReport["overseas_competitor_updates"]> = [];
+    for (let i = 0; i < original.length; i++) {
+      const o = original[i]!;
+      const t = translated[i]!;
+      out.push({
+        company: o.company,
+        url: o.url,
+        country: (t as any)?.country ?? o.country,
+        tag: typeof (t as any)?.tag === "string" && (t as any).tag.trim() ? (t as any).tag : o.tag,
+        title: typeof (t as any)?.title === "string" && (t as any).title.trim() ? (t as any).title : o.title,
+        insight:
+          typeof (t as any)?.insight === "string" && (t as any).insight.trim()
+            ? (t as any).insight
+            : (o.insight ?? undefined),
+      });
+    }
+    return out;
+  };
+
+  const isStructurallyValid = (translated: WeeklyReport["overseas_competitor_updates"]): boolean => {
+    if (!Array.isArray(translated)) return false;
+    if (translated.length !== original.length) return false;
+    for (let i = 0; i < original.length; i++) {
+      const o = original[i]!;
+      const t = translated[i] as any;
+      if (!t || typeof t !== "object") return false;
+      if (t.company !== o.company) return false;
+      if (typeof t.tag !== "string" || !t.tag.trim()) return false;
+      if (typeof t.title !== "string" || !t.title.trim()) return false;
+      if (typeof t.url === "string" && o.url && normalizeUrl(t.url) !== normalizeUrl(o.url)) return false;
+    }
+    return true;
+  };
+
+  const stillNeedsTranslation = (
+    o: NonNullable<WeeklyReport["overseas_competitor_updates"]>[number],
+    t: NonNullable<WeeklyReport["overseas_competitor_updates"]>[number],
+  ): boolean => {
+    if (looksEnglishish(o.tag) && !hasHangul(t.tag)) return true;
+    if (looksEnglishish(o.title) && !hasHangul(t.title)) return true;
+    if (o.insight && looksEnglishish(o.insight) && (!t.insight || !hasHangul(t.insight))) return true;
+    if (o.country && looksEnglishish(o.country) && t.country && !hasHangul(t.country)) return true;
+    return false;
+  };
+
+  const ai = new GoogleGenAI({ apiKey: args.env.GEMINI_API_KEY });
+  const buildBatchPrompt = (mode: "normal" | "strict") => {
+    const rules = [
+      "You are translating a report section into Korean.",
+      "Translate ONLY these fields to natural Korean: tag, title, insight, and country (if present).",
+      "Rules:",
+      "- Do NOT add, remove, or reorder items.",
+      "- Preserve the exact number of items and keep the same order.",
+      "- Do NOT change company names.",
+      "- Do NOT change or fabricate URLs; keep url exactly the same per item (or omit url field).",
+      "- Do NOT add new facts; translate only.",
+      "- For items written in English, produce Korean sentences (keep proper nouns/product names as-is).",
+      mode === "strict"
+        ? `- CRITICAL: The output MUST contain exactly ${original.length} items in overseas_competitor_updates. If unsure, keep original strings rather than omitting anything.`
+        : "",
+      "",
+      "INPUT JSON:",
+      JSON.stringify({ overseas_competitor_updates: original }),
+    ]
+      .filter(Boolean)
+      .join("\n");
+    return rules;
+  };
+
+  const translateBatch = async () => {
+    const run = async (modelName: string) =>
+      ai.models.generateContent({
+        model: modelName,
+        contents: buildBatchPrompt("strict"),
+        config: {
+          temperature: 0,
+          maxOutputTokens: 5000,
+          responseMimeType: "application/json",
+          responseJsonSchema: OverseasTranslateJsonSchema,
+        },
+      });
+
+    const { modelUsed, result } = await selectModelOrFallback({ env: args.env, ai, model: args.env.GEMINI_MODEL, run });
+    const parsed = parseJsonLenient(result.text ?? "") as { overseas_competitor_updates?: unknown };
+    const translated = (parsed && typeof parsed === "object" ? (parsed as any).overseas_competitor_updates : null) as
+      | WeeklyReport["overseas_competitor_updates"]
+      | null;
+    return { translated, modelUsed };
+  };
+
+  let modelUsed = args.env.GEMINI_MODEL;
+  let merged: WeeklyReport["overseas_competitor_updates"] = original;
+  try {
+    const batch = await translateBatch();
+    modelUsed = batch.modelUsed;
+    if (batch.translated && isStructurallyValid(batch.translated)) {
+      const maybe = mergeTranslation(batch.translated);
+      if (maybe) merged = maybe;
+    } else {
+      logger.warn({ items: original.length }, "Overseas translation batch invalid; will try per-item translation");
+    }
+  } catch (err) {
+    logger.warn({ err }, "Overseas translation batch failed; will try per-item translation");
+  }
+
+  const translateOne = async (
+    item: NonNullable<WeeklyReport["overseas_competitor_updates"]>[number],
+  ): Promise<NonNullable<WeeklyReport["overseas_competitor_updates"]>[number] | null> => {
+    const prompt = [
+      "You are translating one report item into Korean.",
+      "Translate ONLY these fields to natural Korean: tag, title, insight, and country (if present).",
+      "Rules:",
+      "- Do NOT change company name.",
+      "- Do NOT change or fabricate URL; keep url exactly the same (or omit url field).",
+      "- Do NOT add new facts; translate only.",
+      "- Output ONLY a single JSON object.",
+      "",
+      "INPUT JSON:",
+      JSON.stringify(item),
+    ].join("\n");
+
+    const run = async (modelName: string) =>
+      ai.models.generateContent({
+        model: modelName,
+        contents: prompt,
+        config: {
+          temperature: 0,
+          maxOutputTokens: 800,
+          responseMimeType: "application/json",
+          responseJsonSchema: OverseasTranslateItemJsonSchema,
+        },
+      });
+
+    const { modelUsed: itemModelUsed, result } = await selectModelOrFallback({
+      env: args.env,
+      ai,
+      model: args.env.GEMINI_MODEL,
+      run,
+    });
+    modelUsed = itemModelUsed;
+    const parsed = parseJsonLenient(result.text ?? "");
+    if (!parsed || typeof parsed !== "object") return null;
+    const t = parsed as any;
+    if (t.company !== item.company) return null;
+    if (typeof t.tag !== "string" || !t.tag.trim()) return null;
+    if (typeof t.title !== "string" || !t.title.trim()) return null;
+    if (typeof t.url === "string" && item.url && normalizeUrl(t.url) !== normalizeUrl(item.url)) return null;
+
+    const translated: NonNullable<WeeklyReport["overseas_competitor_updates"]>[number] = {
+      company: item.company,
+      url: item.url,
+      country: typeof t.country === "string" && t.country.trim() ? t.country.trim() : item.country,
+      tag: t.tag.trim(),
+      title: t.title.trim(),
+      insight: typeof t.insight === "string" && t.insight.trim() ? t.insight.trim() : (item.insight ?? undefined),
+    };
+
+    if (stillNeedsTranslation(item, translated)) return null;
+    return translated;
+  };
+
+  // If any items still look English after batch (or batch wasn't applied), translate those items individually.
+  const toFix: number[] = [];
+  for (const i of indicesNeeding) {
+    const o = original[i]!;
+    const t = merged[i]!;
+    if (stillNeedsTranslation(o, t)) toFix.push(i);
+  }
+
+  if (toFix.length) {
+    const copy = merged.slice();
+    for (const i of toFix) {
+      const fixed = await translateOne(original[i]!);
+      if (fixed) copy[i] = fixed;
+    }
+    merged = copy;
+  }
+
+  const copy: WeeklyReport = JSON.parse(JSON.stringify(args.report));
+  copy.overseas_competitor_updates = merged;
+  return { report: WeeklyReportSchema.parse(copy), meta: { model: modelUsed } };
 }
 
 export async function generateWeeklyReport(args: {

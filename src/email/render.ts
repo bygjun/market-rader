@@ -32,8 +32,8 @@ export function renderMarkdown(report: WeeklyReport, config: ResearchConfig): st
   lines.push(`- 기준일: ${report.report_date} / Week ${report.week_number}`);
   lines.push("");
 
+  lines.push("## 1) 금주의 하이라이트 (Executive Summary)");
   if (report.top_highlights.length) {
-    lines.push("## 1) 금주의 하이라이트 (Executive Summary)");
     for (const item of report.top_highlights.slice(0, 3)) {
       const scoreTag =
         item.importance_score >= 5 ? "🚨 Critical" : item.importance_score >= 4 ? "✨ Important" : "🗒️ Update";
@@ -42,27 +42,30 @@ export function renderMarkdown(report: WeeklyReport, config: ResearchConfig): st
       lines.push(`- **[${scoreTag}]** **${company}** — ${item.title}${source}`);
       lines.push(`  - Insight: ${item.insight}`);
     }
-    lines.push("");
+  } else {
+    lines.push(`- (최근 ${config.lookback_days}일 내 주요 하이라이트 없음)`);
   }
+  lines.push("");
 
   lines.push("## 2) 카테고리별 상세 동향 (Category Deep Dive)");
-  const cats = Object.entries(report.category_updates);
-  for (const [catId, updates] of cats) {
-    if (!updates?.length) continue;
-    lines.push(`### ${categoryName(config, catId)}`);
-    for (const u of updates) {
-      const company = companyLabel(report, u.company);
-      const source = u.url ? ` ([출처](${u.url}))` : "";
-      lines.push(`- \`[${u.tag}]\` **${company}:** ${u.title}${source}`);
-      if (u.insight) lines.push(`  - Insight: ${u.insight}`);
+  for (const c of config.categories) {
+    const updates = report.category_updates?.[c.id] ?? [];
+    lines.push(`### ${categoryName(config, c.id)}`);
+    if (updates.length) {
+      for (const u of updates) {
+        const company = companyLabel(report, u.company);
+        const source = u.url ? ` ([출처](${u.url}))` : "";
+        lines.push(`- \`[${u.tag}]\` **${company}:** ${u.title}${source}`);
+        if (u.insight) lines.push(`  - Insight: ${u.insight}`);
+      }
+    } else {
+      lines.push(`- (최근 ${config.lookback_days}일 내 업데이트 없음)`);
     }
     lines.push("");
   }
 
-  let section = 3;
-
+  lines.push("## 3) 해외 경쟁사 동향 (Global Competitors)");
   if (report.overseas_competitor_updates?.length) {
-    lines.push(`## ${section}) 해외 경쟁사 동향 (Global Competitors)`);
     for (const u of report.overseas_competitor_updates) {
       const company = companyLabel(report, u.company);
       const country = u.country ? ` (${u.country})` : "";
@@ -70,12 +73,13 @@ export function renderMarkdown(report: WeeklyReport, config: ResearchConfig): st
       lines.push(`- \`[${u.tag}]\` **${company}${country}:** ${u.title}${source}`);
       if (u.insight) lines.push(`  - Insight: ${u.insight}`);
     }
-    lines.push("");
-    section += 1;
+  } else {
+    lines.push(`- (최근 ${config.lookback_days}일 내 확인된 해외 경쟁사 업데이트 없음)`);
   }
+  lines.push("");
 
+  lines.push("## 4) 채용으로 보는 기술 신호 (Talent & Tech Signals)");
   if (report.hiring_signals.length) {
-    lines.push(`## ${section}) 채용으로 보는 기술 신호 (Talent & Tech Signals)`);
     lines.push("| 기업명 | 채용 직무 | 우리의 해석 (Hidden Strategy) |");
     lines.push("| :--- | :--- | :--- |");
     for (const h of report.hiring_signals) {
@@ -83,15 +87,18 @@ export function renderMarkdown(report: WeeklyReport, config: ResearchConfig): st
       const position = h.url ? `[${h.position}](${h.url})` : h.position;
       lines.push(`| ${company} | ${position} | ${h.strategic_inference} |`);
     }
-    lines.push("");
-    section += 1;
+  } else {
+    lines.push(`- (최근 ${config.lookback_days}일 내 유의미한 채용 신호 없음)`);
   }
+  lines.push("");
 
+  lines.push("## 5) 우리의 대응 (Action Items)");
   if (report.action_items.length) {
-    lines.push(`## ${section}) 우리의 대응 (Action Items)`);
     for (const a of report.action_items) lines.push(`- ${a}`);
-    lines.push("");
+  } else {
+    lines.push(`- (이번 주 권장 액션 없음)`);
   }
+  lines.push("");
 
   return lines.join("\n");
 }

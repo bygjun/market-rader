@@ -28,7 +28,7 @@ export const HighlightSchema = z.object({
   category: CategoryId,
   title: z.string().min(1),
   insight: z.string().min(1),
-  importance_score: z.number().int().min(1).max(5),
+  importance_score: z.number().int().min(1).max(5).default(3),
   link: OptionalUrl,
 });
 
