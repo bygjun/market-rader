@@ -1,6 +1,17 @@
 import nodemailer from "nodemailer";
 import type { MailEnv } from "../lib/env.js";
 
+function normalizeFrom(env: MailEnv): string {
+  const raw = (env.MAIL_FROM ?? "").trim();
+  if (!raw) return env.SMTP_USER;
+  if (raw.includes("<") && raw.includes(">")) return raw;
+  if (raw.includes("@")) return raw;
+  const name = raw.replace(/^["']|["']$/g, "").trim();
+  const addr = (env.SMTP_USER ?? "").trim();
+  if (!addr || !addr.includes("@")) return raw;
+  return name ? `${name} <${addr}>` : addr;
+}
+
 export async function sendEmail(args: {
   env: MailEnv;
   subject: string;
@@ -17,7 +28,7 @@ export async function sendEmail(args: {
   const to = args.env.MAIL_TO.split(",").map((s) => s.trim()).filter(Boolean);
 
   await transporter.sendMail({
-    from: args.env.MAIL_FROM,
+    from: normalizeFrom(args.env),
     to,
     subject: args.subject,
     html: args.html,
