@@ -66,6 +66,14 @@ npm run report -- --dry-run --input-report config/sample-report.json
 
 `.github/workflows/daily.yml` 사용.
 
+### 스케줄이 안 돌 때 체크
+
+- 스케줄 트리거는 **기본 브랜치(default branch)** 에 있는 워크플로만 실행됩니다(예: `main`). PR/다른 브랜치에만 있으면 수동 실행은 되더라도 스케줄은 안 뜰 수 있습니다.
+- 이 저장소가 **fork** 라면 `schedule` 이벤트는 실행되지 않습니다(상위 저장소에서만 스케줄을 돌릴 수 있습니다).
+- 저장소에 **60일 이상 활동이 없으면** GitHub가 스케줄 워크플로를 자동으로 비활성화할 수 있습니다. 이 경우 `Actions` 탭에서 워크플로를 다시 활성화하거나, `cron` 값을 수정해 커밋하면 재활성화됩니다.
+- `cron`은 **UTC 기준**이고, 실제 실행은 수 분(가끔 10~20분) 지연될 수 있습니다. (`0 0 * * *` = 매일 09:00 KST)
+- `Actions` 탭에서 해당 워크플로를 열고, 실행 목록에서 이벤트가 `schedule` 인 실행이 생성되는지 확인해 보세요.
+
 필수 Secrets:
 - `GEMINI_API_KEY`
 - (선택) `GEMINI_MODEL`, `REQUIRE_GROUNDING`
