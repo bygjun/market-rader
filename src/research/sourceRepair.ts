@@ -76,6 +76,19 @@ export function dropItemsWithBadUrls(args: {
   return WeeklyReportSchema.parse(copy);
 }
 
+export function dropItemsWithoutSourceUrls(report: WeeklyReport): WeeklyReport {
+  const copy: WeeklyReport = JSON.parse(JSON.stringify(report));
+
+  copy.top_highlights = copy.top_highlights.filter((h) => !!h.link);
+  for (const cat of Object.keys(copy.category_updates) as Array<keyof WeeklyReport["category_updates"]>) {
+    copy.category_updates[cat] = copy.category_updates[cat].filter((u) => !!u.url);
+  }
+  copy.overseas_competitor_updates = (copy.overseas_competitor_updates ?? []).filter((u) => !!u.url);
+  copy.hiring_signals = copy.hiring_signals.filter((h) => !!h.url);
+
+  return WeeklyReportSchema.parse(copy);
+}
+
 function parseJsonLenient(text: string): unknown {
   try {
     return JSON.parse(text);

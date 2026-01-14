@@ -1,7 +1,15 @@
 {
   "timezone": "Asia/Seoul",
   "report_name": "Market Radar",
-  "lookback_days": 7,
+  "lookback_days": 30,
+  "source_provider": "searchapi_google_news",
+  "searchapi": {
+    "max_results_per_query": 100,
+    "max_pages_per_query": 10,
+    "concurrency": 3,
+    "include_kr": true,
+    "include_global": true
+  },
   "watchlist_only": false,
   "min_companies_per_category": 5,
   "max_companies_per_category": 10,
@@ -39,24 +47,72 @@
       "name": "비정형·AI 기술 특화",
       "emoji": "🧠",
       "description": "LLM/생성형 AI, 검색/요약, OCR, 멀티모달, 특허, 비정형 데이터"
+    },
+    {
+      "id": "CAT-E",
+      "name": "업무 효율화 플랫폼",
+      "emoji": "🧰",
+      "description": "협업/프로젝트 관리, 업무 자동화·워크플로우, 생산성 SaaS, 문서·지식관리, 업무용 AI"
     }
   ],
   "watchlist": [
     {
       "company": "딥서치",
       "category_id": "CAT-A",
+      "aliases": ["DeepSearch"],
       "keywords": ["투자", "파트너십", "STO", "증권사", "IR", "보도자료", "채용"]
     },
     {
       "company": "아이템스카우트",
       "category_id": "CAT-C",
+      "aliases": ["ItemScout"],
       "keywords": ["알리익스프레스", "기능", "업데이트", "데이터", "리포트", "채용"]
     },
     {
       "company": "업스테이지",
       "category_id": "CAT-D",
+      "aliases": ["Upstage"],
       "keywords": ["OCR", "의료", "보험", "파트너십", "채용", "보도자료"]
+    },
+    {
+      "company": "스윗테크놀로지스",
+      "category_id": "CAT-E",
+      "aliases": ["Swit.io"],
+      "keywords": ["업데이트", "출시", "기능", "협업", "워크플로우", "AI", "파트너십", "투자", "채용"]
+    },
+    {
+      "company": "토스랩",
+      "category_id": "CAT-E",
+      "aliases": ["Tosslab", "JANDI"],
+      "keywords": ["업데이트", "출시", "기능", "협업", "메신저", "워크스페이스", "AI", "파트너십", "채용"]
+    },
+    {
+      "company": "마드라스체크",
+      "category_id": "CAT-E",
+      "aliases": ["flow.team", "MadrasCheck"],
+      "keywords": ["업데이트", "출시", "기능", "프로젝트", "업무관리", "워크플로우", "AI", "파트너십", "채용"]
     }
+  ],
+  "global_watchlist": [
+    { "company": "PitchBook", "category_id": "CAT-A", "aliases": ["pitchbook.com"], "keywords": ["launch", "release", "update", "partnership", "funding"] },
+    { "company": "Crunchbase", "category_id": "CAT-A", "aliases": ["crunchbase.com"], "keywords": ["launch", "update", "funding", "report"] },
+    { "company": "CB Insights", "category_id": "CAT-A", "aliases": ["cbinsights.com"], "keywords": ["launch", "update", "report"] },
+
+    { "company": "ZoomInfo", "category_id": "CAT-B", "aliases": ["zoominfo.com"], "keywords": ["launch", "update", "AI", "platform"] },
+    { "company": "Apollo", "category_id": "CAT-B", "aliases": ["apollo.io"], "keywords": ["launch", "update", "AI", "copilot"] },
+    { "company": "6sense", "category_id": "CAT-B", "aliases": ["6sense.com"], "keywords": ["launch", "update", "AI", "platform"] },
+
+    { "company": "Jungle Scout", "category_id": "CAT-C", "aliases": ["junglescout.com"], "keywords": ["launch", "update", "report"] },
+    { "company": "Helium 10", "category_id": "CAT-C", "aliases": ["helium10.com"], "keywords": ["launch", "update"] },
+    { "company": "Profitero", "category_id": "CAT-C", "aliases": ["profitero.com"], "keywords": ["launch", "update"] },
+
+    { "company": "OpenAI", "category_id": "CAT-D", "aliases": ["openai.com"], "keywords": ["launch", "release", "update"] },
+    { "company": "Anthropic", "category_id": "CAT-D", "aliases": ["anthropic.com"], "keywords": ["launch", "release", "update"] },
+    { "company": "Mistral AI", "category_id": "CAT-D", "aliases": ["mistral.ai"], "keywords": ["release", "update"] },
+
+    { "company": "Notion", "category_id": "CAT-E", "aliases": ["notion.so"], "keywords": ["launch", "release", "update", "AI"] },
+    { "company": "Asana", "category_id": "CAT-E", "aliases": ["asana.com"], "keywords": ["launch", "update", "AI"] },
+    { "company": "Monday.com", "category_id": "CAT-E", "aliases": ["monday.com"], "keywords": ["launch", "update", "AI"] }
   ],
   "email": {
     "subject_prefix": "[Market Radar]"

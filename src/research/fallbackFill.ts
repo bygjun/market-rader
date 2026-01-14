@@ -55,6 +55,12 @@ function inferTag(title: string): string {
   return "Update";
 }
 
+function toOptionalNonEmptyString(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const s = value.trim();
+  return s ? s : undefined;
+}
+
 function countUpdates(report: WeeklyReport): number {
   return Object.values(report.category_updates ?? {}).reduce((sum, items) => sum + (items?.length ?? 0), 0);
 }
@@ -79,14 +85,19 @@ export function fillReportFromSourcesFallback(args: {
     const catId = cat.id;
     const existing = copy.category_updates?.[catId] ?? [];
 
-    // Keep only the first item per company to maximize distinct company coverage.
+    const isSearchApiMode = config.source_provider === "searchapi_google_news";
     const dedupedExisting: WeeklyReport["category_updates"][typeof catId] = [];
-    const seenCompanies = new Set<string>();
-    for (const u of existing) {
-      const key = normalizeCompanyKey(u.company);
-      if (seenCompanies.has(key)) continue;
-      seenCompanies.add(key);
-      dedupedExisting.push(u);
+    if (isSearchApiMode) {
+      dedupedExisting.push(...existing);
+    } else {
+      // Keep only the first item per company to maximize distinct company coverage.
+      const seenCompanies = new Set<string>();
+      for (const u of existing) {
+        const key = normalizeCompanyKey(u.company);
+        if (seenCompanies.has(key)) continue;
+        seenCompanies.add(key);
+        dedupedExisting.push(u);
+      }
     }
 
     const catSources = (sourcesByCat.get(catId) ?? []).filter((s) => isLikelyKoreanCompany(s.company, companyHq));
@@ -95,28 +106,86 @@ export function fillReportFromSourcesFallback(args: {
       continue;
     }
 
-    const byCompany = new Map<string, SourceItem>();
-    for (const s of catSources) {
-      const key = normalizeCompanyKey(s.company);
-      if (!byCompany.has(key)) byCompany.set(key, s);
-    }
+    const maxCompanies = config.max_companies_per_category;
+    const final: WeeklyReport["category_updates"][typeof catId] = [];
 
-    const maxCompanies = Math.max(config.min_companies_per_category, config.max_companies_per_category);
-    const final: WeeklyReport["category_updates"][typeof catId] = [...dedupedExisting].slice(0, maxCompanies);
-    const already = new Set(final.map((u) => normalizeCompanyKey(u.company)));
+    if (isSearchApiMode) {
+      const maxUpdatesPerCompany = config.searchapi?.max_updates_per_company ?? 3;
+      const seenItems = new Set<string>();
+      const companyCounts = new Map<string, number>();
+      const companyOrder: string[] = [];
+      const companyName: Record<string, string> = {};
 
-    for (const s of byCompany.values()) {
-      if (final.length >= maxCompanies) break;
-      const key = normalizeCompanyKey(s.company);
-      if (already.has(key)) continue;
-      final.push({
-        company: s.company,
-        tag: inferTag(s.title),
-        title: s.title,
-        url: s.url,
-        insight: s.note,
-      });
-      already.add(key);
+      const addUpdate = (u: WeeklyReport["category_updates"][typeof catId][number]): void => {
+        const companyKey = normalizeCompanyKey(u.company);
+        const itemKey = u.url ? u.url : `${companyKey}|${u.title.trim().toLowerCase()}`;
+        if (seenItems.has(itemKey)) return;
+        const currentCompanies = companyCounts.size;
+        if (!companyCounts.has(companyKey) && currentCompanies >= maxCompanies) return;
+        const count = companyCounts.get(companyKey) ?? 0;
+        if (count >= maxUpdatesPerCompany) return;
+        seenItems.add(itemKey);
+        companyCounts.set(companyKey, count + 1);
+        if (!companyName[companyKey]) {
+          companyName[companyKey] = u.company;
+          companyOrder.push(companyKey);
+        }
+        final.push(u);
+      };
+
+      for (const u of dedupedExisting) addUpdate(u);
+
+      for (const s of catSources) {
+        const companyKey = normalizeCompanyKey(s.company);
+        if (!companyName[companyKey]) {
+          companyName[companyKey] = s.company;
+          companyOrder.push(companyKey);
+        }
+      }
+
+      const sourcesByCompany = new Map<string, SourceItem[]>();
+      for (const s of catSources) {
+        const companyKey = normalizeCompanyKey(s.company);
+        const list = sourcesByCompany.get(companyKey) ?? [];
+        list.push(s);
+        sourcesByCompany.set(companyKey, list);
+      }
+
+      // Preserve company order, fill up to maxUpdatesPerCompany per company and maxCompanies companies.
+      for (const companyKey of companyOrder) {
+        const list = sourcesByCompany.get(companyKey) ?? [];
+        for (const s of list) {
+          addUpdate({
+            company: s.company,
+            tag: inferTag(s.title),
+            title: s.title,
+            url: s.url,
+            insight: toOptionalNonEmptyString(s.note),
+          });
+        }
+      }
+    } else {
+      final.push(...dedupedExisting.slice(0, maxCompanies));
+      const byCompany = new Map<string, SourceItem>();
+      for (const s of catSources) {
+        const key = normalizeCompanyKey(s.company);
+        if (!byCompany.has(key)) byCompany.set(key, s);
+      }
+
+      const already = new Set(final.map((u) => normalizeCompanyKey(u.company)));
+      for (const s of byCompany.values()) {
+        if (final.length >= maxCompanies) break;
+        const key = normalizeCompanyKey(s.company);
+        if (already.has(key)) continue;
+        final.push({
+          company: s.company,
+          tag: inferTag(s.title),
+          title: s.title,
+          url: s.url,
+          insight: toOptionalNonEmptyString(s.note),
+        });
+        already.add(key);
+      }
     }
 
     // If we still don't have enough distinct companies, keep what we have (cannot invent).
@@ -124,45 +193,87 @@ export function fillReportFromSourcesFallback(args: {
   }
 
   if ((copy.overseas_competitor_updates?.length ?? 0) === 0) {
-    const overseasCandidates: WeeklyReport["overseas_competitor_updates"] = [];
-    const seen = new Set<string>();
-    for (const s of sources) {
+    const maxItems = 15;
+    const perCategoryTarget = Math.max(1, Math.min(3, Math.ceil(maxItems / Math.max(1, config.categories.length))));
+
+    const overseasSources = sources.filter((s) => {
       const country = getCountry(s.company, companyHq);
-      const isOverseas = country ? !isKoreaCountryLabel(country) : isLikelyNonKoreanCompany(s.company);
-      if (!isOverseas) continue;
-      const key = `${normalizeCompany(s.company).toLowerCase()}|${s.title.trim().toLowerCase()}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      overseasCandidates.push({
+      return country ? !isKoreaCountryLabel(country) : isLikelyNonKoreanCompany(s.company);
+    });
+
+    const byCategoryCompany = new Map<string, Map<string, SourceItem[]>>();
+    for (const s of overseasSources) {
+      const cat = s.category;
+      const companyKey = normalizeCompanyKey(s.company);
+      const companies = byCategoryCompany.get(cat) ?? new Map<string, SourceItem[]>();
+      const list = companies.get(companyKey) ?? [];
+      list.push(s);
+      companies.set(companyKey, list);
+      byCategoryCompany.set(cat, companies);
+    }
+
+    const out: WeeklyReport["overseas_competitor_updates"] = [];
+    const seenCompanies = new Set<string>();
+    const seenItems = new Set<string>();
+
+    const pushOne = (s: SourceItem) => {
+      const companyKey = normalizeCompanyKey(s.company);
+      const itemKey = `${companyKey}|${s.title.trim().toLowerCase()}`;
+      if (seenItems.has(itemKey)) return;
+      if (seenCompanies.has(companyKey)) return;
+      seenItems.add(itemKey);
+      seenCompanies.add(companyKey);
+      const country = getCountry(s.company, companyHq);
+      out.push({
         company: s.company,
         country: country ?? undefined,
+        category: s.category,
         tag: inferTag(s.title),
         title: s.title,
         url: s.url,
-        insight: s.note,
+        insight: toOptionalNonEmptyString(s.note),
       });
-      if (overseasCandidates.length >= 8) break;
+    };
+
+    // Pass 1: pick a few companies per category to improve category coverage.
+    for (const cat of config.categories) {
+      const companies = byCategoryCompany.get(cat.id);
+      if (!companies) continue;
+      let picked = 0;
+      for (const list of companies.values()) {
+        if (out.length >= maxItems) break;
+        const s = list[0];
+        if (!s) continue;
+        pushOne(s);
+        if (seenCompanies.has(normalizeCompanyKey(s.company))) picked++;
+        if (picked >= perCategoryTarget) break;
+      }
     }
-    copy.overseas_competitor_updates = overseasCandidates;
+
+    // Pass 2: fill remaining slots with distinct companies regardless of category.
+    if (out.length < maxItems) {
+      for (const s of overseasSources) {
+        if (out.length >= maxItems) break;
+        pushOne(s);
+      }
+    }
+
+    copy.overseas_competitor_updates = out.slice(0, maxItems);
   }
 
   if ((copy.action_items?.length ?? 0) < 3 && countUpdates(copy) > 0) {
     const actions = new Set<string>(copy.action_items ?? []);
-    const suggestions: string[] = [];
-
     const topUpdates = Object.entries(copy.category_updates)
       .flatMap(([catId, items]) => items.map((u) => ({ catId, u })))
       .slice(0, 6);
 
     for (const { catId, u } of topUpdates) {
       const action = `기획팀: ${catId} - ${u.company} (${u.tag}) 업데이트 상세 검토 및 벤치마킹 포인트 정리`;
-      if (!actions.has(action)) suggestions.push(action);
       actions.add(action);
       if (actions.size >= 6) break;
     }
 
-    copy.action_items = Array.from(actions).concat(suggestions).slice(0, 6);
-    if (copy.action_items.length > 6) copy.action_items = copy.action_items.slice(0, 6);
+    copy.action_items = Array.from(actions).slice(0, 6);
   }
 
   return WeeklyReportSchema.parse(copy);
@@ -212,10 +323,11 @@ export function fillOverseasFromSourcesFallback(args: {
     out.push({
       company: s.company,
       country: country ?? undefined,
+      category: s.category,
       tag: inferTag(s.title),
       title: s.title,
       url: s.url,
-      insight: s.note,
+      insight: toOptionalNonEmptyString(s.note),
     });
   }
 
@@ -231,10 +343,11 @@ export function fillOverseasFromSourcesFallback(args: {
       out.push({
         company: s.company,
         country: country ?? undefined,
+        category: s.category,
         tag: inferTag(s.title),
         title: s.title,
         url: s.url,
-        insight: s.note,
+        insight: toOptionalNonEmptyString(s.note),
       });
     }
   }

@@ -25,21 +25,44 @@ function companyLabel(report: WeeklyReport, company: string): string {
   return homepage ? `[${company}](${homepage})` : company;
 }
 
-export function renderMarkdown(report: WeeklyReport, config: ResearchConfig): string {
+export function renderMarkdown(
+  report: WeeklyReport,
+  config: ResearchConfig,
+  meta?: { sourcesCollected?: number; sourcesQueries?: number; droppedUrls?: number; dedupedItems?: number },
+): string {
   const lines: string[] = [];
 
   lines.push(`# ${config.report_name} 주간 경쟁사 동향 리포트`);
   lines.push(`- 기준일: ${report.report_date} / Week ${report.week_number}`);
+  if (meta?.sourcesCollected != null) {
+    const q = meta.sourcesQueries != null ? ` (queries: ${meta.sourcesQueries})` : "";
+    lines.push(`- 수집된 소스: ${meta.sourcesCollected}개${q}`);
+  }
+  if (meta?.droppedUrls != null && meta.droppedUrls > 0) {
+    lines.push(`- 링크 필터링(404/홈페이지 등): ${meta.droppedUrls}개 제외`);
+  }
+  if (meta?.dedupedItems != null && meta.dedupedItems > 0) {
+    lines.push(`- 동일 주 중복 제거: ${meta.dedupedItems}개 제외`);
+  }
   lines.push("");
 
   lines.push("## 1) 금주의 하이라이트 (Executive Summary)");
   if (report.top_highlights.length) {
-    for (const item of report.top_highlights.slice(0, 3)) {
+    const picked: WeeklyReport["top_highlights"] = [];
+    const seenCompanies = new Set<string>();
+    for (const item of report.top_highlights) {
+      const key = normalizeCompanyKey(item.company);
+      if (seenCompanies.has(key)) continue;
+      seenCompanies.add(key);
+      picked.push(item);
+      if (picked.length >= 3) break;
+    }
+    for (const item of picked) {
       const scoreTag =
         item.importance_score >= 5 ? "🚨 Critical" : item.importance_score >= 4 ? "✨ Important" : "🗒️ Update";
       const company = companyLabel(report, item.company);
-      const source = item.link ? ` ([출처](${item.link}))` : "";
-      lines.push(`- **[${scoreTag}]** **${company}** — ${item.title}${source}`);
+      const title = item.link ? `[${item.title}](${item.link})` : item.title;
+      lines.push(`- **[${scoreTag}]** **${company}** — ${title}`);
       lines.push(`  - Insight: ${item.insight}`);
     }
   } else {
@@ -52,11 +75,35 @@ export function renderMarkdown(report: WeeklyReport, config: ResearchConfig): st
     const updates = report.category_updates?.[c.id] ?? [];
     lines.push(`### ${categoryName(config, c.id)}`);
     if (updates.length) {
+      const grouped = new Map<string, Array<(typeof updates)[number]>>();
+      const companyOrder: string[] = [];
+      const companyName: Record<string, string> = {};
       for (const u of updates) {
-        const company = companyLabel(report, u.company);
-        const source = u.url ? ` ([출처](${u.url}))` : "";
-        lines.push(`- \`[${u.tag}]\` **${company}:** ${u.title}${source}`);
-        if (u.insight) lines.push(`  - Insight: ${u.insight}`);
+        const key = normalizeCompanyKey(u.company);
+        if (!grouped.has(key)) {
+          grouped.set(key, []);
+          companyOrder.push(key);
+          companyName[key] = u.company;
+        }
+        grouped.get(key)!.push(u);
+      }
+
+      for (const key of companyOrder) {
+        const items = grouped.get(key) ?? [];
+        const company = companyLabel(report, companyName[key] ?? key);
+        if (items.length <= 1) {
+          const u = items[0]!;
+          const title = u.url ? `[${u.title}](${u.url})` : u.title;
+          lines.push(`- \`[${u.tag}]\` **${company}:** ${title}`);
+          if (u.insight) lines.push(`  - Insight: ${u.insight}`);
+          continue;
+        }
+        lines.push(`- **${company}**`);
+        for (const u of items) {
+          const title = u.url ? `[${u.title}](${u.url})` : u.title;
+          lines.push(`  - \`[${u.tag}]\` ${title}`);
+          if (u.insight) lines.push(`    - Insight: ${u.insight}`);
+        }
       }
     } else {
       lines.push(`- (최근 ${config.lookback_days}일 내 업데이트 없음)`);
@@ -64,17 +111,67 @@ export function renderMarkdown(report: WeeklyReport, config: ResearchConfig): st
     lines.push("");
   }
 
-  lines.push("## 3) 해외 경쟁사 동향 (Global Competitors)");
-  if (report.overseas_competitor_updates?.length) {
-    for (const u of report.overseas_competitor_updates) {
-      const company = companyLabel(report, u.company);
-      const country = u.country ? ` (${u.country})` : "";
-      const source = u.url ? ` ([출처](${u.url}))` : "";
-      lines.push(`- \`[${u.tag}]\` **${company}${country}:** ${u.title}${source}`);
-      if (u.insight) lines.push(`  - Insight: ${u.insight}`);
+  lines.push("## 3) 해외 경쟁사 동향 (Global Competitors by Category)");
+  const overseas = report.overseas_competitor_updates ?? [];
+  const byCategory = new Map<string, Array<(typeof overseas)[number]>>();
+  const uncategorized: Array<(typeof overseas)[number]> = [];
+  for (const u of overseas) {
+    if (u.category) {
+      const list = byCategory.get(u.category) ?? [];
+      list.push(u);
+      byCategory.set(u.category, list);
+    } else {
+      uncategorized.push(u);
     }
-  } else {
+  }
+
+  const renderOverseasList = (updates: Array<(typeof overseas)[number]>): void => {
+    const grouped = new Map<string, Array<(typeof updates)[number]>>();
+    const companyOrder: string[] = [];
+    for (const u of updates) {
+      const key = normalizeCompanyKey(u.company);
+      if (!grouped.has(key)) {
+        grouped.set(key, []);
+        companyOrder.push(key);
+      }
+      grouped.get(key)!.push(u);
+    }
+
+    for (const key of companyOrder) {
+      const items = grouped.get(key) ?? [];
+      const first = items[0]!;
+      const company = companyLabel(report, first.company);
+      const country = first.country ? ` (${first.country})` : "";
+      if (items.length <= 1) {
+        const title = first.url ? `[${first.title}](${first.url})` : first.title;
+        lines.push(`- \`[${first.tag}]\` **${company}${country}:** ${title}`);
+        if (first.insight) lines.push(`  - Insight: ${first.insight}`);
+        continue;
+      }
+      lines.push(`- **${company}${country}**`);
+      for (const u of items) {
+        const title = u.url ? `[${u.title}](${u.url})` : u.title;
+        lines.push(`  - \`[${u.tag}]\` ${title}`);
+        if (u.insight) lines.push(`    - Insight: ${u.insight}`);
+      }
+    }
+  };
+
+  if (overseas.length === 0) {
     lines.push(`- (최근 ${config.lookback_days}일 내 확인된 해외 경쟁사 업데이트 없음)`);
+  } else {
+    for (const c of config.categories) {
+      const items = byCategory.get(c.id) ?? [];
+      lines.push(`### ${categoryName(config, c.id)} (해외)`);
+      if (items.length) renderOverseasList(items);
+      else lines.push(`- (최근 ${config.lookback_days}일 내 업데이트 없음)`);
+      lines.push("");
+    }
+    if (uncategorized.length) {
+      lines.push("### 기타 (해외)");
+      renderOverseasList(uncategorized);
+      lines.push("");
+    }
   }
   lines.push("");
 

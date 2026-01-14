@@ -54,6 +54,7 @@ export function buildWeeklyPrompt(args: {
     `- Prefer Korean company names for Korean companies; if a Korean company has a common English name, format like "회사명 (English)".`,
     `- IMPORTANT: category_updates MUST contain ONLY Korea-headquartered companies. If a company is headquartered outside Korea, put it in overseas_competitor_updates instead (do NOT include it in category_updates).`,
     `- Also include overseas_competitor_updates: recent updates from competitors headquartered outside Korea (10-15 items when possible, prefer distinct companies). Write tag/title/insight in Korean even for overseas companies. If a company's HQ country is unclear, omit it from overseas_competitor_updates. If watchlist_only=true, overseas_competitor_updates MUST only use watchlist companies and may be empty.`,
+    `- For overseas_competitor_updates, also include "category" (one of the category IDs) whenever you can confidently map the company/update to a category.`,
     `- If you include any non-Korea companies in top_highlights/category_updates/hiring_signals, try to also include them in overseas_competitor_updates (deduplicate by company+title).`,
     `- Provide source links (url/link) for each item whenever possible. Prefer including an url; if you cannot find a credible source url, omit that item.`,
     `- NEVER fabricate URLs. Do not guess URL slugs. Only output URLs you actually found in web search results or official pages.`,
@@ -65,7 +66,7 @@ export function buildWeeklyPrompt(args: {
     `- action_items MUST be an array of strings (not objects). Example: "기획팀: 알리익스프레스 지표 벤치마킹".`,
     ``,
     `Schema (keys must match exactly):`,
-    `{"report_date":"YYYY-MM-DD","week_number":2,"top_highlights":[{"company":"...","category":"CAT-A","title":"...","insight":"...","importance_score":5,"link":"https://..."}],"category_updates":{"CAT-A":[{"company":"...","tag":"...","title":"...","url":"https://...","insight":"..."}],"CAT-B":[],"CAT-C":[],"CAT-D":[]},"overseas_competitor_updates":[{"company":"...","country":"USA","tag":"...","title":"...","url":"https://...","insight":"..."}],"hiring_signals":[{"company":"...","position":"...","strategic_inference":"...","url":"https://..."}],"action_items":["..."]}`,
+    `{"report_date":"YYYY-MM-DD","week_number":2,"top_highlights":[{"company":"...","category":"CAT-A","title":"...","insight":"...","importance_score":5,"link":"https://..."}],"category_updates":{"CAT-A":[{"company":"...","tag":"...","title":"...","url":"https://...","insight":"..."}],"CAT-B":[],"CAT-C":[],"CAT-D":[],"CAT-E":[]},"overseas_competitor_updates":[{"company":"...","country":"USA","category":"CAT-D","tag":"...","title":"...","url":"https://...","insight":"..."}],"hiring_signals":[{"company":"...","position":"...","strategic_inference":"...","url":"https://..."}],"action_items":["..."]}`,
   ].join("\n");
 }
 
@@ -174,6 +175,7 @@ export function buildOverseasSourcesPrompt(args: {
     `- CAT-B: ZoomInfo, Apollo.io, 6sense, Demandbase, Cognism, Lusha, Clay`,
     `- CAT-C: Jungle Scout, Helium 10, Keepa, DataWeave, Profitero, Stackline`,
     `- CAT-D: OpenAI, Anthropic, Cohere, Mistral AI, Perplexity, Hugging Face, Stability AI`,
+    `- CAT-E: Notion, Asana, Monday.com, ClickUp, Slack, Airtable (for global); Swit, JANDI (Tosslab), Flow (Madras Check) (for Korea)`,
     ``,
     `Output JSON schema:`,
     `{"sources":[{"company":"...","category":"CAT-A","title":"...","url":"https://...","published_date":"YYYY-MM-DD","quote":"(optional) short verbatim snippet","note":"(optional) why relevant"}]}`,
@@ -218,13 +220,14 @@ export function buildReportFromSourcesPrompt(args: {
     `- IMPORTANT: category_updates MUST contain ONLY Korea-headquartered companies. If a company is headquartered outside Korea, put it in overseas_competitor_updates instead (do NOT include it in category_updates).`,
     `- For EACH category, include at least ${config.min_companies_per_category} DISTINCT Korea-headquartered companies in category_updates when the provided sources support it, and include at most ${config.max_companies_per_category} companies per category.`,
     `- Include overseas_competitor_updates: 10-15 items about competitors headquartered outside Korea (prefer distinct companies), using only Allowed URLs. Write tag/title/insight in Korean even for overseas companies. If you cannot find suitable overseas items in the provided sources, return an empty array.`,
+    `- For overseas_competitor_updates, also include "category" (one of the category IDs) whenever possible.`,
     `- If the source list contains non-Korea companies that you used elsewhere (top_highlights/category_updates/hiring_signals), prefer adding them into overseas_competitor_updates too (deduplicate).`,
     `- importance_score: 1-5; pick top_highlights as the 3 most important items.`,
     `- Provide 3-6 action_items (array of strings).`,
     `- Do NOT include company_homepages here; it will be attached separately.`,
     ``,
     `Report schema (keys must match exactly):`,
-    `{"report_date":"YYYY-MM-DD","week_number":2,"company_homepages":{"회사명":"https://..."}, "top_highlights":[{"company":"...","category":"CAT-A","title":"...","insight":"...","importance_score":5,"link":"https://..."}],"category_updates":{"CAT-A":[{"company":"...","tag":"...","title":"...","url":"https://...","insight":"..."}],"CAT-B":[],"CAT-C":[],"CAT-D":[]},"overseas_competitor_updates":[{"company":"...","country":"USA","tag":"...","title":"...","url":"https://...","insight":"..."}],"hiring_signals":[{"company":"...","position":"...","strategic_inference":"...","url":"https://..."}],"action_items":["..."]}`,
+    `{"report_date":"YYYY-MM-DD","week_number":2,"company_homepages":{"회사명":"https://..."}, "top_highlights":[{"company":"...","category":"CAT-A","title":"...","insight":"...","importance_score":5,"link":"https://..."}],"category_updates":{"CAT-A":[{"company":"...","tag":"...","title":"...","url":"https://...","insight":"..."}],"CAT-B":[],"CAT-C":[],"CAT-D":[],"CAT-E":[]},"overseas_competitor_updates":[{"company":"...","country":"USA","category":"CAT-D","tag":"...","title":"...","url":"https://...","insight":"..."}],"hiring_signals":[{"company":"...","position":"...","strategic_inference":"...","url":"https://..."}],"action_items":["..."]}`,
   ].join("\n");
 }
 
@@ -266,5 +269,54 @@ export function buildCompanyHqPrompt(args: { companies: string[] }): string {
     ``,
     `Output schema:`,
     `{"company_hq":{"회사명":"Korea","OtherCompany":"USA"}}`,
+  ].join("\n");
+}
+
+export function buildCompanyDiscoveryPrompt(args: {
+  reportDate: string;
+  lookbackDays: number;
+  categories: Array<{ id: string; name: string; description?: string }>;
+  focusCategoryIds: string[];
+  excludedCompanies: string[];
+  alreadyKnownCompanies: string[];
+  perCategoryMax: number;
+}): string {
+  const focus = new Set(args.focusCategoryIds);
+  const cats = args.categories
+    .filter((c) => focus.has(c.id))
+    .map((c) => `- ${c.id}: ${c.name}${c.description ? ` (${c.description})` : ""}`)
+    .join("\n");
+
+  const excluded = args.excludedCompanies.length ? args.excludedCompanies.map((c) => `- ${c}`).join("\n") : "- (none)";
+  const known = args.alreadyKnownCompanies.length ? args.alreadyKnownCompanies.map((c) => `- ${c}`).join("\n") : "- (none)";
+
+  return [
+    `You are helping build a competitor watchlist.`,
+    `You MUST use grounded web search.`,
+    `Return ONLY JSON, no markdown, no extra text.`,
+    ``,
+    `Report date: ${args.reportDate}`,
+    `Lookback window: last ${args.lookbackDays} days`,
+    ``,
+    `Task: For EACH category below, suggest up to ${args.perCategoryMax} additional companies headquartered in Korea that plausibly have news/announcements in the lookback window.`,
+    `- Prefer startups/scale-ups over conglomerates.`,
+    `- Only include real companies with a public web presence.`,
+    `- Do NOT include duplicates, and do NOT include companies already known.`,
+    `- Exclude the following companies unless absolutely necessary:`,
+    excluded,
+    ``,
+    `Categories (use these exact IDs):`,
+    cats,
+    ``,
+    `Already-known companies (do NOT include these):`,
+    known,
+    ``,
+    `Output schema:`,
+    `{"companies":[{"company":"회사명(한국어)","category_id":"CAT-A","aliases":["EnglishName(optional)"]}]}`,
+    ``,
+    `Rules:`,
+    `- category_id MUST be one of the provided category IDs.`,
+    `- aliases is optional; include an English name ONLY if it is commonly used (Latin letters).`,
+    `- Do NOT output URLs.`,
   ].join("\n");
 }

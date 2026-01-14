@@ -39,7 +39,10 @@ function parseSimpleYamlMapping(raw: string): Record<string, string> {
 }
 
 function hydrateEnvFromSecrets(): void {
-  if (!isBlank(process.env.GEMINI_API_KEY)) return;
+  const hasSecretBlob =
+    (typeof process.env.ENV_B64 === "string" && process.env.ENV_B64.trim()) ||
+    (typeof process.env.MARKET_RADER_SECRET_YML === "string" && process.env.MARKET_RADER_SECRET_YML.trim());
+  if (!hasSecretBlob) return;
 
   const candidates: Array<{ name: string; raw: string }> = [];
   if (typeof process.env.ENV_B64 === "string" && process.env.ENV_B64.trim()) {
@@ -65,7 +68,8 @@ function hydrateEnvFromSecrets(): void {
       }
     }
 
-    if (!isBlank(process.env.GEMINI_API_KEY)) return;
+    // Stop early only when we have the critical keys for common execution paths.
+    if (!isBlank(process.env.GEMINI_API_KEY) && !isBlank(process.env.SEARCHAPI_API_KEY)) return;
   }
 }
 
@@ -96,8 +100,19 @@ const MailEnvSchema = z.object({
   MAIL_TO: z.string().min(1),
 });
 
+const SearchApiEnvSchema = z.object({
+  SEARCHAPI_API_KEY: z.string().min(1),
+  SEARCHAPI_BASE_URL: z
+    .string()
+    .optional()
+    .transform((v) => (typeof v === "string" && v.trim() ? v.trim() : undefined))
+    .pipe(z.string().url().optional())
+    .default("https://www.searchapi.io/api/v1/search"),
+});
+
 export type GeminiEnv = z.infer<typeof GeminiEnvSchema>;
 export type MailEnv = z.infer<typeof MailEnvSchema>;
+export type SearchApiEnv = z.infer<typeof SearchApiEnvSchema>;
 
 export function loadGeminiEnv(): GeminiEnv {
   hydrateEnvFromSecrets();
@@ -107,4 +122,9 @@ export function loadGeminiEnv(): GeminiEnv {
 export function loadMailEnv(): MailEnv {
   hydrateEnvFromSecrets();
   return MailEnvSchema.parse(process.env);
+}
+
+export function loadSearchApiEnv(): SearchApiEnv {
+  hydrateEnvFromSecrets();
+  return SearchApiEnvSchema.parse(process.env);
 }

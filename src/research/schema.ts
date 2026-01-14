@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const CategoryId = z.enum(["CAT-A", "CAT-B", "CAT-C", "CAT-D"]);
+export const CategoryId = z.enum(["CAT-A", "CAT-B", "CAT-C", "CAT-D", "CAT-E"]);
 
 function coerceOptionalUrl(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -43,6 +43,7 @@ export const CategoryUpdateSchema = z.object({
 export const OverseasCompetitorUpdateSchema = z.object({
   company: z.string().min(1),
   country: z.string().min(1).optional(),
+  category: CategoryId.optional(),
   tag: z.string().min(1),
   title: z.string().min(1),
   url: OptionalUrl,
@@ -92,12 +93,14 @@ export const WeeklyReportSchema = z.object({
       "CAT-B": z.array(CategoryUpdateSchema).default([]),
       "CAT-C": z.array(CategoryUpdateSchema).default([]),
       "CAT-D": z.array(CategoryUpdateSchema).default([]),
+      "CAT-E": z.array(CategoryUpdateSchema).default([]),
     })
     .default({
       "CAT-A": [],
       "CAT-B": [],
       "CAT-C": [],
       "CAT-D": [],
+      "CAT-E": [],
     }),
   overseas_competitor_updates: z.array(OverseasCompetitorUpdateSchema).default([]),
   hiring_signals: z.array(HiringSignalSchema).default([]),

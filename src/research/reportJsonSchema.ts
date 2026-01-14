@@ -25,7 +25,7 @@ export const WeeklyReportJsonSchema = {
         required: ["company", "category", "title", "insight", "importance_score"],
         properties: {
           company: { type: "string" },
-          category: { type: "string", enum: ["CAT-A", "CAT-B", "CAT-C", "CAT-D"] },
+          category: { type: "string", enum: ["CAT-A", "CAT-B", "CAT-C", "CAT-D", "CAT-E"] },
           title: { type: "string" },
           insight: { type: "string" },
           importance_score: { type: "integer", minimum: 1, maximum: 5 },
@@ -36,7 +36,7 @@ export const WeeklyReportJsonSchema = {
     category_updates: {
       type: "object",
       additionalProperties: true,
-      required: ["CAT-A", "CAT-B", "CAT-C", "CAT-D"],
+      required: ["CAT-A", "CAT-B", "CAT-C", "CAT-D", "CAT-E"],
       properties: {
         "CAT-A": {
           type: "array",
@@ -98,6 +98,21 @@ export const WeeklyReportJsonSchema = {
             },
           },
         },
+        "CAT-E": {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: true,
+            required: ["company", "tag", "title"],
+            properties: {
+              company: { type: "string" },
+              tag: { type: "string" },
+              title: { type: "string" },
+              url: { type: "string" },
+              insight: { type: "string" },
+            },
+          },
+        },
       },
     },
     overseas_competitor_updates: {
@@ -109,6 +124,7 @@ export const WeeklyReportJsonSchema = {
         properties: {
           company: { type: "string" },
           country: { type: "string" },
+          category: { type: "string", enum: ["CAT-A", "CAT-B", "CAT-C", "CAT-D", "CAT-E"] },
           tag: { type: "string" },
           title: { type: "string" },
           url: { type: "string" },

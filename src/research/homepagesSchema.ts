@@ -21,12 +21,14 @@ function coerceOptionalUrl(value: unknown): string | undefined {
 
 export const CompanyHomepagesSchema = z.object({
   company_homepages: z
-    .record(z.string().min(1), z.preprocess(coerceOptionalUrl, z.string().url().optional()))
+    .record(z.string(), z.preprocess(coerceOptionalUrl, z.string().url().optional()))
     .default({})
     .transform((rec) => {
       const out: Record<string, string> = {};
       for (const [k, v] of Object.entries(rec)) {
-        if (typeof v === "string" && v) out[k] = v;
+        const key = k.trim();
+        if (!key) continue;
+        if (typeof v === "string" && v) out[key] = v;
       }
       return out;
     }),

@@ -21,3 +21,10 @@ export function getWeekNumberInTimeZone(date: Date, timeZone: string): number {
   return Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
 }
 
+export function getWeekYearInTimeZone(date: Date, timeZone: string): number {
+  const iso = getIsoDateInTimeZone(date, timeZone);
+  const d = new Date(`${iso}T00:00:00.000Z`);
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  return d.getUTCFullYear();
+}

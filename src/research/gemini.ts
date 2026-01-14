@@ -8,6 +8,8 @@ import { WeeklyReportJsonSchema } from "./reportJsonSchema.js";
 import { SourceListSchema, type SourceList } from "./sourcesSchema.js";
 import { CompanyHomepagesSchema, type CompanyHomepages } from "./homepagesSchema.js";
 import { CompanyHqSchema, type CompanyHq } from "./companyHqSchema.js";
+import { CompanyDiscoverySchema, type CompanyDiscovery } from "./companyDiscoverySchema.js";
+import { CompanyDiscoveryJsonSchema } from "./companyDiscoveryJsonSchema.js";
 import { OverseasTranslateItemJsonSchema, OverseasTranslateJsonSchema } from "./overseasTranslateSchema.js";
 
 function parseJsonLenient(text: string): unknown {
@@ -447,6 +449,38 @@ export async function generateCompanyHq(args: {
   return { hq, meta: { model: modelUsed } };
 }
 
+export async function generateCompanyDiscovery(args: {
+  env: GeminiEnv;
+  prompt: string;
+}): Promise<{ discovery: CompanyDiscovery; meta: { model: string } }> {
+  const ai = new GoogleGenAI({ apiKey: args.env.GEMINI_API_KEY });
+
+  const run = async (modelName: string) => {
+    return ai.models.generateContent({
+      model: modelName,
+      contents: args.prompt,
+      config: {
+        tools: [{ googleSearch: {} }],
+        temperature: 0,
+        maxOutputTokens: 3000,
+        responseMimeType: "application/json",
+        responseJsonSchema: CompanyDiscoveryJsonSchema,
+      },
+    });
+  };
+
+  const { modelUsed, result } = await selectModelOrFallback({ env: args.env, ai, model: args.env.GEMINI_MODEL, run });
+  const text = result.text ?? "";
+  try {
+    const parsed = parseJsonLenient(text);
+    const discovery = CompanyDiscoverySchema.parse(parsed);
+    return { discovery, meta: { model: modelUsed } };
+  } catch (err) {
+    logger.warn({ err }, "Company discovery JSON parse failed; continuing without discovery");
+    return { discovery: CompanyDiscoverySchema.parse({ companies: [] }), meta: { model: modelUsed } };
+  }
+}
+
 export async function translateOverseasSectionToKorean(args: {
   env: GeminiEnv;
   report: WeeklyReport;
@@ -480,6 +514,7 @@ export async function translateOverseasSectionToKorean(args: {
         company: o.company,
         url: o.url,
         country: (t as any)?.country ?? o.country,
+        category: o.category,
         tag: typeof (t as any)?.tag === "string" && (t as any).tag.trim() ? (t as any).tag : o.tag,
         title: typeof (t as any)?.title === "string" && (t as any).title.trim() ? (t as any).title : o.title,
         insight:
@@ -624,6 +659,7 @@ export async function translateOverseasSectionToKorean(args: {
       company: item.company,
       url: item.url,
       country: typeof t.country === "string" && t.country.trim() ? t.country.trim() : item.country,
+      category: item.category,
       tag: t.tag.trim(),
       title: t.title.trim(),
       insight: typeof t.insight === "string" && t.insight.trim() ? t.insight.trim() : (item.insight ?? undefined),
@@ -761,7 +797,9 @@ export async function generateWeeklyReport(args: {
       }
     }
 
-    const report = WeeklyReportSchema.parse(normalizeRootJson(parsed));
+    const normalized = normalizeRootJson(parsed);
+    const softened = applyMissingFieldPlaceholders(normalized);
+    const report = WeeklyReportSchema.parse(softened);
 
     const groundingChunks = result?.candidates?.[0]?.groundingMetadata?.groundingChunks ?? [];
     const hasGroundingChunks = Array.isArray(groundingChunks) && groundingChunks.length > 0;

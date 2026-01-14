@@ -57,6 +57,7 @@ export function ensureOverseasCompetitorSection(args: {
     seen.add(key);
     candidates.push({
       company: h.company,
+      category: h.category,
       tag: "Highlight",
       title: h.title,
       url: h.link,
@@ -134,6 +135,7 @@ export function splitOverseasFromCategoryUpdatesByHq(args: {
       overseas.push({
         company: u.company,
         country,
+        category: cat,
         tag: u.tag,
         title: u.title,
         url: u.url,
