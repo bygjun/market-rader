@@ -25,7 +25,11 @@ import {
   generateWeeklyReport,
   generateWeeklyReportFromSources,
 } from "./research/gemini.js";
-import { generateSourceListViaSearchApiGoogleNews, generateSourceListViaSearchApiGoogleNewsForWatchlist } from "./research/searchapiNews.js";
+import {
+  generateKoreaSourcesViaSearchApiGoogleNews,
+  generateGlobalSourcesViaSearchApiGoogleNews,
+  generateSourceListViaSearchApiGoogleNewsForWatchlist,
+} from "./research/searchapiNews.js";
 import { WeeklyReportSchema, type WeeklyReport } from "./research/schema.js";
 import { postprocessReport } from "./research/postprocess.js";
 import {
@@ -283,11 +287,33 @@ async function main(): Promise<void> {
 
     let sourcesResult:
       | Awaited<ReturnType<typeof generateSourceList>>
-      | Awaited<ReturnType<typeof generateSourceListViaSearchApiGoogleNews>>;
+      | Awaited<ReturnType<typeof generateSourceListViaSearchApiGoogleNewsForWatchlist>>;
 
     if (researchConfig.source_provider === "searchapi_google_news") {
       searchEnv = loadSearchApiEnv();
-      sourcesResult = await generateSourceListViaSearchApiGoogleNews({ env: searchEnv, config: researchConfig, reportDate });
+      const includeKr = researchConfig.searchapi?.include_kr ?? true;
+      const includeGlobal = researchConfig.searchapi?.include_global ?? true;
+
+      // Run KR and GLOBAL collection separately to improve relevance/accuracy.
+      const global = includeGlobal
+        ? await generateGlobalSourcesViaSearchApiGoogleNews({ env: searchEnv, config: researchConfig, reportDate })
+        : { sources: { sources: [] }, meta: { provider: "searchapi_google_news" as const, queries: 0, results: 0 } };
+      const kr = includeKr
+        ? await generateKoreaSourcesViaSearchApiGoogleNews({ env: searchEnv, config: researchConfig, reportDate })
+        : { sources: { sources: [] }, meta: { provider: "searchapi_google_news" as const, queries: 0, results: 0 } };
+
+      const seen = new Set<string>();
+      const mergedSources = [...global.sources.sources, ...kr.sources.sources].filter((s) => {
+        const key = normalizeUrlForDedupe(s.url);
+        if (!key || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+
+      sourcesResult = {
+        sources: { sources: mergedSources },
+        meta: { provider: "searchapi_google_news", queries: kr.meta.queries + global.meta.queries, results: mergedSources.length },
+      };
     } else {
       sourcesResult = await generateSourceList({ env: geminiEnv, prompt: baseSourcesPrompt });
     }
@@ -362,25 +388,54 @@ async function main(): Promise<void> {
     const sourcesForReport = sourcesResult.sources.sources.filter((s) => allowedSet.has(normalizeUrlForDedupe(s.url)));
 
     if (researchConfig.source_provider === "searchapi_google_news") {
-      const metaFromSearch = sourcesResult as Awaited<ReturnType<typeof generateSourceListViaSearchApiGoogleNews>>;
+      const metaFromSearch = sourcesResult as Awaited<ReturnType<typeof generateSourceListViaSearchApiGoogleNewsForWatchlist>>;
       let sourcesForReportFinal = sourcesForReport;
       let queriesUsed = metaFromSearch.meta.queries;
 
+      const countLocales = (sources: typeof sourcesForReportFinal): { kr: number; global: number } => {
+        let kr = 0;
+        let global = 0;
+        for (const s of sources) {
+          const note = typeof s.note === "string" ? s.note : "";
+          if (note.includes("[KR]")) kr++;
+          else if (note.includes("[GLOBAL]")) global++;
+        }
+        return { kr, global };
+      };
+
+      const mergeSourcesByUrl = (a: typeof sourcesForReportFinal, b: typeof sourcesForReportFinal): typeof sourcesForReportFinal => {
+        const merged: typeof sourcesForReportFinal = [];
+        const seenUrls = new Set<string>();
+        for (const s of [...a, ...b]) {
+          const key = normalizeUrlForDedupe(s.url);
+          if (!key || seenUrls.has(key)) continue;
+          seenUrls.add(key);
+          merged.push(s);
+        }
+        return merged;
+      };
+
       const discoveryEnabled = (researchConfig.searchapi?.enable_company_discovery ?? true) && !researchConfig.watchlist_only;
       if (discoveryEnabled && searchEnv) {
-        const byCat = new Map<string, Set<string>>();
-        for (const id of categoryIds) byCat.set(id, new Set());
+        const byCatKorea = new Map<string, Set<string>>();
+        for (const id of categoryIds) byCatKorea.set(id, new Set());
         for (const s of sourcesForReportFinal) {
-          if (!byCat.has(s.category)) continue;
-          byCat.get(s.category)!.add(s.company.trim());
+          if (!byCatKorea.has(s.category)) continue;
+          const looksKrLocale = typeof s.note === "string" && s.note.includes("[KR]");
+          const looksKrCompany = hasHangul(s.company);
+          if (!looksKrLocale && !looksKrCompany) continue;
+          byCatKorea.get(s.category)!.add(s.company.trim());
         }
-        const shortCats = categoryIds.filter((id) => (byCat.get(id)?.size ?? 0) === 0);
+        const minKrCompanies = researchConfig.min_companies_per_category ?? 0;
+        const shortCats =
+          minKrCompanies > 0 ? categoryIds.filter((id) => (byCatKorea.get(id)?.size ?? 0) < minKrCompanies) : [];
 
         if (shortCats.length) {
           const alreadyKnown = Array.from(
             new Set([
               ...sourcesForReportFinal.map((s) => s.company.trim()).filter(Boolean),
               ...(researchConfig.watchlist ?? []).map((w) => w.company.trim()).filter(Boolean),
+              ...(researchConfig.global_watchlist ?? []).map((w) => w.company.trim()).filter(Boolean),
             ]),
           );
 
@@ -422,11 +477,12 @@ async function main(): Promise<void> {
             if (picked.length >= maxTotal) break;
             const cat = c.category_id.trim();
             const current = perCatPicked.get(cat) ?? 0;
-            const currentCount = byCat.get(cat)?.size ?? 0;
-            const need = Math.max(0, targetPerCategory - currentCount);
+            const currentCount = byCatKorea.get(cat)?.size ?? 0;
+            const desired = Math.max(targetPerCategory, minKrCompanies);
+            const need = Math.max(0, desired - currentCount);
+            if (need === 0) continue;
             // Try a few more than "need" because some will have zero results.
-            const cap = Math.max(0, need + 2);
-            if (cap === 0) continue;
+            const cap = need + 2;
             if (current >= cap) continue;
             perCatPicked.set(cat, current + 1);
             picked.push({ company: c.company.trim(), category_id: cat, aliases: c.aliases ?? [] });
@@ -448,7 +504,7 @@ async function main(): Promise<void> {
               config: researchConfig,
               reportDate,
               watchlist: extraWatchlist,
-              overrides: { maxResults, maxPages, includeKr: true, includeGlobal: false },
+              overrides: { maxResults, maxPages, includeKr: true, includeGlobal: false, requireCompanyMention: false },
             });
 
             queriesUsed += extra.meta.queries;
@@ -457,20 +513,136 @@ async function main(): Promise<void> {
             const extraAllowedSet = new Set(extraAllowed.map((u) => normalizeUrlForDedupe(u)));
             const extraSourcesForReport = extra.sources.sources.filter((s) => extraAllowedSet.has(normalizeUrlForDedupe(s.url)));
 
-            const merged: typeof sourcesForReportFinal = [];
-            const seenUrls = new Set<string>();
-            for (const s of [...sourcesForReportFinal, ...extraSourcesForReport]) {
-              const key = normalizeUrlForDedupe(s.url);
-              if (!key || seenUrls.has(key)) continue;
-              seenUrls.add(key);
-              merged.push(s);
-            }
-            sourcesForReportFinal = merged;
+            sourcesForReportFinal = mergeSourcesByUrl(sourcesForReportFinal, extraSourcesForReport);
           }
         }
       }
 
-      renderMeta = { sourcesCollected: sourcesForReportFinal.length, sourcesQueries: queriesUsed };
+      // If Korea sources are still too sparse, run additional KR-only discovery to top up.
+      const minKrSources = researchConfig.searchapi?.kr_min_sources ?? 0;
+      if (discoveryEnabled && searchEnv && minKrSources > 0) {
+        const before = countLocales(sourcesForReportFinal);
+        if (before.kr < minKrSources) {
+          logger.info({ kr: before.kr, target: minKrSources }, "KR sources below target; running KR-only top-up");
+          const alreadyKnown = Array.from(
+            new Set([
+              ...sourcesForReportFinal.map((s) => s.company.trim()).filter(Boolean),
+              ...(researchConfig.watchlist ?? []).map((w) => w.company.trim()).filter(Boolean),
+              ...(researchConfig.global_watchlist ?? []).map((w) => w.company.trim()).filter(Boolean),
+            ]),
+          );
+
+          const perCategoryMax = researchConfig.searchapi?.discovery_candidates_per_category ?? 12;
+          const prompt = buildCompanyDiscoveryPrompt({
+            reportDate,
+            lookbackDays: researchConfig.lookback_days,
+            categories: researchConfig.categories,
+            focusCategoryIds: categoryIds,
+            excludedCompanies: researchConfig.excluded_companies ?? [],
+            alreadyKnownCompanies: alreadyKnown,
+            perCategoryMax,
+          });
+
+          const discovered = await generateCompanyDiscovery({ env: geminiEnv, prompt });
+          const excluded = new Set((researchConfig.excluded_companies ?? []).map((c) => c.trim()).filter(Boolean));
+          const known = new Set(alreadyKnown.map((c) => c.trim()).filter(Boolean));
+          const seenCompanyCat = new Set<string>();
+          const candidates = discovered.discovery.companies
+            .map((c) => ({
+              company: c.company.trim(),
+              category_id: c.category_id.trim(),
+              aliases: c.aliases ?? [],
+            }))
+            .filter((c) => {
+              if (!c.company) return false;
+              if (!categoryIds.includes(c.category_id)) return false;
+              if (excluded.has(c.company)) return false;
+              if (known.has(c.company)) return false;
+              const key = `${c.category_id}|${c.company}`;
+              if (seenCompanyCat.has(key)) return false;
+              seenCompanyCat.add(key);
+              return true;
+            });
+
+          const maxTotal = researchConfig.searchapi?.discovery_max_companies_total ?? 30;
+          const maxResults = researchConfig.searchapi?.discovery_max_results_per_query ?? 20;
+          const maxPages = researchConfig.searchapi?.discovery_max_pages_per_query ?? 3;
+
+          const byCat = new Map<string, Array<(typeof candidates)[number]>>();
+          for (const c of candidates) {
+            const list = byCat.get(c.category_id) ?? [];
+            list.push(c);
+            byCat.set(c.category_id, list);
+          }
+
+          const pickedAll: typeof candidates = [];
+          const perCatPicked = new Map<string, number>();
+          const perCatCap = 12;
+          let rr = 0;
+          let misses = 0;
+          while (pickedAll.length < maxTotal && misses < categoryIds.length) {
+            const cat = categoryIds[rr % categoryIds.length]!;
+            rr++;
+            const list = byCat.get(cat) ?? [];
+            const next = list.shift();
+            if (!next) {
+              misses++;
+              continue;
+            }
+            misses = 0;
+            const cur = perCatPicked.get(cat) ?? 0;
+            if (cur >= perCatCap) continue;
+            perCatPicked.set(cat, cur + 1);
+            pickedAll.push(next);
+          }
+
+          const estimatePerCompany = 3;
+          const maxBatches = 3;
+          let batches = 0;
+          let current = before;
+          const queue = pickedAll.slice();
+
+          while (queue.length && current.kr < minKrSources && batches < maxBatches) {
+            const need = Math.max(0, minKrSources - current.kr);
+            const batchSize = Math.min(queue.length, Math.max(5, Math.ceil(need / estimatePerCompany)));
+            const batch = queue.splice(0, batchSize);
+            if (batch.length === 0) break;
+
+            const extraWatchlist = batch.map((p) => ({
+              company: p.company,
+              category_id: p.category_id as any,
+              aliases: p.aliases ?? [],
+              keywords: [],
+            }));
+
+            const extra = await generateSourceListViaSearchApiGoogleNewsForWatchlist({
+              env: searchEnv,
+              config: researchConfig,
+              reportDate,
+              watchlist: extraWatchlist,
+              overrides: { maxResults, maxPages, includeKr: true, includeGlobal: false, requireCompanyMention: false },
+            });
+
+            queriesUsed += extra.meta.queries;
+            let extraAllowed = extra.sources.sources.map((s) => s.url);
+            extraAllowed = filterUrlsBySeen({ urls: extraAllowed, seen: seenThisWeek });
+            const extraAllowedSet = new Set(extraAllowed.map((u) => normalizeUrlForDedupe(u)));
+            const extraSourcesForReport = extra.sources.sources.filter((s) => extraAllowedSet.has(normalizeUrlForDedupe(s.url)));
+            sourcesForReportFinal = mergeSourcesByUrl(sourcesForReportFinal, extraSourcesForReport);
+            current = countLocales(sourcesForReportFinal);
+            batches++;
+          }
+
+          if (current.kr < minKrSources) {
+            logger.warn({ kr: current.kr, target: minKrSources, batches }, "KR sources still below target after top-up");
+          } else {
+            logger.info({ kr: current.kr, target: minKrSources, batches }, "KR sources target met after top-up");
+          }
+        }
+      }
+
+      const after = countLocales(sourcesForReportFinal);
+      renderMeta = { sourcesCollected: sourcesForReportFinal.length, sourcesQueries: queriesUsed, sourcesKr: after.kr, sourcesGlobal: after.global };
 
       const companies = Array.from(new Set(sourcesForReportFinal.map((s) => s.company))).slice(0, 60);
 

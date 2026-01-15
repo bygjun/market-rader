@@ -5,7 +5,7 @@ export type UrlCheckResult =
 function isProbablyOkStatus(status: number): boolean {
   if (status >= 200 && status <= 399) return true;
   // Some sites block bot/HEAD requests but still exist.
-  if (status === 401 || status === 403 || status === 429) return true;
+  if (status === 401 || status === 403 || status === 406 || status === 418 || status === 429 || status === 451) return true;
   return false;
 }
 
@@ -65,7 +65,16 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, { ...init, redirect: "follow", signal: controller.signal });
+    const headers = new Headers(init.headers);
+    if (!headers.has("user-agent")) {
+      headers.set(
+        "user-agent",
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+      );
+    }
+    if (!headers.has("accept")) headers.set("accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
+    if (!headers.has("accept-language")) headers.set("accept-language", "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7");
+    return await fetch(url, { ...init, headers, redirect: "follow", signal: controller.signal });
   } finally {
     clearTimeout(timer);
   }
@@ -74,7 +83,8 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
 async function checkOne(url: string, timeoutMs: number): Promise<UrlCheckResult> {
   try {
     let res = await fetchWithTimeout(url, { method: "HEAD" }, timeoutMs);
-    if (res.status === 405 || res.status === 400) {
+    // Many sites block HEAD or respond with non-representative 4xx; retry with GET broadly.
+    if ((res.status >= 400 && res.status <= 599) || res.status === 405) {
       res = await fetchWithTimeout(url, { method: "GET" }, timeoutMs);
     }
 

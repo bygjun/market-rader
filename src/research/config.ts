@@ -37,6 +37,7 @@ export const ResearchConfigSchema = z.object({
       require_company_mention: z.boolean().default(true),
       max_updates_per_company: z.number().int().min(1).max(10).default(3),
       enable_company_discovery: z.boolean().default(true),
+      kr_min_sources: z.number().int().min(0).max(500).default(0),
       discovery_candidates_per_category: z.number().int().min(1).max(30).default(12),
       discovery_target_companies_per_category: z.number().int().min(1).max(10).default(3),
       discovery_max_companies_total: z.number().int().min(1).max(80).default(12),

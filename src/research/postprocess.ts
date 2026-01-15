@@ -240,7 +240,9 @@ export async function postprocessReport(args: {
 
       const hardBadUrls = Array.from(checks.values())
         .filter((r) => !r.ok)
-        .filter((r) => r.reason === "SOFT_404" || r.status === 404 || r.status === 410 || r.reason.startsWith("HTTP_4"))
+        // Only treat true not-found signals as "invalid" here.
+        // Other 4xx statuses can be bot-blocks or method restrictions and should not erase content.
+        .filter((r) => r.reason === "SOFT_404" || r.status === 404 || r.status === 410)
         .map((r) => r.url);
 
       if (hardBadUrls.length) {

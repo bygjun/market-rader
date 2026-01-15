@@ -194,18 +194,32 @@ function hasHangul(s: string): boolean {
   return /[\uAC00-\uD7AF]/.test(s);
 }
 
-function looksEnglishish(s: string): boolean {
+function countHangul(s: string): number {
+  const matches = s.match(/[\uAC00-\uD7AF]/g);
+  return matches ? matches.length : 0;
+}
+
+function countLatinLetters(s: string): number {
+  const matches = s.match(/[A-Za-z]/g);
+  return matches ? matches.length : 0;
+}
+
+function needsKoreanTranslation(s: string): boolean {
   if (!s) return false;
   const trimmed = s.trim();
   if (!trimmed) return false;
-  if (hasHangul(trimmed)) return false;
-  return /[A-Za-z]/.test(trimmed);
+  const latin = countLatinLetters(trimmed);
+  if (latin === 0) return false;
+  const hangul = countHangul(trimmed);
+  if (hangul === 0) return true;
+  // Mixed strings (e.g. "[글로벌] ...English...") still need translation when English dominates.
+  return latin >= 12 && latin >= hangul * 2;
 }
 
 function needsOverseasKoreanTranslation(report: WeeklyReport): boolean {
   const updates = report.overseas_competitor_updates ?? [];
   return updates.some(
-    (u) => looksEnglishish(u.title) || looksEnglishish(u.tag) || (u.insight ? looksEnglishish(u.insight) : false),
+    (u) => needsKoreanTranslation(u.title) || needsKoreanTranslation(u.tag) || (u.insight ? needsKoreanTranslation(u.insight) : false),
   );
 }
 
@@ -490,12 +504,17 @@ export async function translateOverseasSectionToKorean(args: {
   const original = args.report.overseas_competitor_updates ?? [];
   if (original.length === 0) return { report: args.report, meta: { model: args.env.GEMINI_MODEL } };
 
+  const normalizeGlobalLabel = (s: string): string => {
+    // Normalize common markers like "[GLOBAL]" to the Korean label used in the newsletter.
+    return s.replace(/\[(?:GLOBAL|global)\]/g, "[글로벌]");
+  };
+
   const needsItemTranslation = (u: NonNullable<WeeklyReport["overseas_competitor_updates"]>[number]): boolean => {
     return (
-      looksEnglishish(u.tag) ||
-      looksEnglishish(u.title) ||
-      (u.insight ? looksEnglishish(u.insight) : false) ||
-      (u.country ? looksEnglishish(u.country) : false)
+      needsKoreanTranslation(u.tag) ||
+      needsKoreanTranslation(u.title) ||
+      (u.insight ? needsKoreanTranslation(u.insight) : false) ||
+      (u.country ? needsKoreanTranslation(u.country) : false)
     );
   };
 
@@ -513,13 +532,22 @@ export async function translateOverseasSectionToKorean(args: {
       out.push({
         company: o.company,
         url: o.url,
-        country: (t as any)?.country ?? o.country,
+        country:
+          typeof (t as any)?.country === "string" && (t as any).country.trim()
+            ? normalizeGlobalLabel((t as any).country)
+            : o.country,
         category: o.category,
-        tag: typeof (t as any)?.tag === "string" && (t as any).tag.trim() ? (t as any).tag : o.tag,
-        title: typeof (t as any)?.title === "string" && (t as any).title.trim() ? (t as any).title : o.title,
+        tag:
+          typeof (t as any)?.tag === "string" && (t as any).tag.trim()
+            ? normalizeGlobalLabel((t as any).tag)
+            : o.tag,
+        title:
+          typeof (t as any)?.title === "string" && (t as any).title.trim()
+            ? normalizeGlobalLabel((t as any).title)
+            : o.title,
         insight:
           typeof (t as any)?.insight === "string" && (t as any).insight.trim()
-            ? (t as any).insight
+            ? normalizeGlobalLabel((t as any).insight)
             : (o.insight ?? undefined),
       });
     }
@@ -545,10 +573,10 @@ export async function translateOverseasSectionToKorean(args: {
     o: NonNullable<WeeklyReport["overseas_competitor_updates"]>[number],
     t: NonNullable<WeeklyReport["overseas_competitor_updates"]>[number],
   ): boolean => {
-    if (looksEnglishish(o.tag) && !hasHangul(t.tag)) return true;
-    if (looksEnglishish(o.title) && !hasHangul(t.title)) return true;
-    if (o.insight && looksEnglishish(o.insight) && (!t.insight || !hasHangul(t.insight))) return true;
-    if (o.country && looksEnglishish(o.country) && t.country && !hasHangul(t.country)) return true;
+    if (needsKoreanTranslation(o.tag) && needsKoreanTranslation(t.tag)) return true;
+    if (needsKoreanTranslation(o.title) && needsKoreanTranslation(t.title)) return true;
+    if (o.insight && needsKoreanTranslation(o.insight) && (!t.insight || needsKoreanTranslation(t.insight))) return true;
+    if (o.country && needsKoreanTranslation(o.country) && t.country && needsKoreanTranslation(t.country)) return true;
     return false;
   };
 
@@ -564,6 +592,7 @@ export async function translateOverseasSectionToKorean(args: {
       "- Do NOT change or fabricate URLs; keep url exactly the same per item (or omit url field).",
       "- Do NOT add new facts; translate only.",
       "- For items written in English, produce Korean sentences (keep proper nouns/product names as-is).",
+      "- If any field contains the marker [GLOBAL], translate it as [글로벌] while translating the rest.",
       mode === "strict"
         ? `- CRITICAL: The output MUST contain exactly ${original.length} items in overseas_competitor_updates. If unsure, keep original strings rather than omitting anything.`
         : "",
@@ -622,6 +651,7 @@ export async function translateOverseasSectionToKorean(args: {
       "- Do NOT change company name.",
       "- Do NOT change or fabricate URL; keep url exactly the same (or omit url field).",
       "- Do NOT add new facts; translate only.",
+      "- If any field contains the marker [GLOBAL], translate it as [글로벌] while translating the rest.",
       "- Output ONLY a single JSON object.",
       "",
       "INPUT JSON:",
@@ -658,11 +688,15 @@ export async function translateOverseasSectionToKorean(args: {
     const translated: NonNullable<WeeklyReport["overseas_competitor_updates"]>[number] = {
       company: item.company,
       url: item.url,
-      country: typeof t.country === "string" && t.country.trim() ? t.country.trim() : item.country,
+      country:
+        typeof t.country === "string" && t.country.trim() ? normalizeGlobalLabel(t.country.trim()) : item.country,
       category: item.category,
-      tag: t.tag.trim(),
-      title: t.title.trim(),
-      insight: typeof t.insight === "string" && t.insight.trim() ? t.insight.trim() : (item.insight ?? undefined),
+      tag: normalizeGlobalLabel(t.tag.trim()),
+      title: normalizeGlobalLabel(t.title.trim()),
+      insight:
+        typeof t.insight === "string" && t.insight.trim()
+          ? normalizeGlobalLabel(t.insight.trim())
+          : (item.insight ?? undefined),
     };
 
     if (stillNeedsTranslation(item, translated)) return null;

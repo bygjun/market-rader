@@ -44,22 +44,20 @@ jobs:
           set -euo pipefail
 
           decode_b64() {
-            python3 - <<'PY'
-import base64, os, re, sys
-s = os.environ.get("B64", "")
-compact = re.sub(r"\\s+", "", s)
-if not compact:
-  sys.exit(0)
-if not re.fullmatch(r"[A-Za-z0-9+/=_-]+", compact):
-  sys.exit(0)
-normalized = compact.replace("-", "+").replace("_", "/")
-normalized += "=" * ((4 - (len(normalized) % 4)) % 4)
-try:
-  raw = base64.b64decode(normalized, validate=False)
-  sys.stdout.write(raw.decode("utf-8", errors="replace"))
-except Exception:
-  pass
-PY
+            local compact normalized mod
+            compact="$(printf "%s" "${B64:-}" | tr -d ' \n\r\t')"
+            [ -z "$compact" ] && return 0
+            printf "%s" "$compact" | grep -Eq '^[A-Za-z0-9+/=_-]+$' || return 0
+            normalized="$(printf "%s" "$compact" | tr '_-' '/+')"
+            mod=$(( ${#normalized} % 4 ))
+            if [ "$mod" -eq 2 ]; then
+              normalized="${normalized}=="
+            elif [ "$mod" -eq 3 ]; then
+              normalized="${normalized}="
+            elif [ "$mod" -ne 0 ]; then
+              return 0
+            fi
+            printf "%s" "$normalized" | base64 --decode 2>/dev/null || true
           }
 
           required_keys=(GEMINI_API_KEY SMTP_HOST SMTP_USER SMTP_PASS MAIL_FROM MAIL_TO)

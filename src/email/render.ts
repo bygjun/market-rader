@@ -28,7 +28,14 @@ function companyLabel(report: WeeklyReport, company: string): string {
 export function renderMarkdown(
   report: WeeklyReport,
   config: ResearchConfig,
-  meta?: { sourcesCollected?: number; sourcesQueries?: number; droppedUrls?: number; dedupedItems?: number },
+  meta?: {
+    sourcesCollected?: number;
+    sourcesQueries?: number;
+    sourcesKr?: number;
+    sourcesGlobal?: number;
+    droppedUrls?: number;
+    dedupedItems?: number;
+  },
 ): string {
   const lines: string[] = [];
 
@@ -36,7 +43,11 @@ export function renderMarkdown(
   lines.push(`- 기준일: ${report.report_date} / Week ${report.week_number}`);
   if (meta?.sourcesCollected != null) {
     const q = meta.sourcesQueries != null ? ` (queries: ${meta.sourcesQueries})` : "";
-    lines.push(`- 수집된 소스: ${meta.sourcesCollected}개${q}`);
+    const locale =
+      meta.sourcesKr != null || meta.sourcesGlobal != null
+        ? ` (KR: ${meta.sourcesKr ?? 0}, GLOBAL: ${meta.sourcesGlobal ?? 0})`
+        : "";
+    lines.push(`- 수집된 소스: ${meta.sourcesCollected}개${locale}${q}`);
   }
   if (meta?.droppedUrls != null && meta.droppedUrls > 0) {
     lines.push(`- 링크 필터링(404/홈페이지 등): ${meta.droppedUrls}개 제외`);

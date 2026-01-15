@@ -355,12 +355,47 @@ export async function generateSourceListViaSearchApiGoogleNews(args: {
   });
 }
 
+export async function generateKoreaSourcesViaSearchApiGoogleNews(args: {
+  env: SearchApiEnv;
+  config: ResearchConfig;
+  reportDate: string;
+}): Promise<{ sources: SourceList; meta: { provider: "searchapi_google_news"; queries: number; results: number } }> {
+  return generateSourceListViaSearchApiGoogleNewsForWatchlist({
+    env: args.env,
+    config: args.config,
+    reportDate: args.reportDate,
+    watchlist: args.config.watchlist ?? [],
+    overrides: { includeKr: true, includeGlobal: false },
+  });
+}
+
+export async function generateGlobalSourcesViaSearchApiGoogleNews(args: {
+  env: SearchApiEnv;
+  config: ResearchConfig;
+  reportDate: string;
+}): Promise<{ sources: SourceList; meta: { provider: "searchapi_google_news"; queries: number; results: number } }> {
+  // GLOBAL run uses global_watchlist only (watchlist is intentionally empty).
+  return generateSourceListViaSearchApiGoogleNewsForWatchlist({
+    env: args.env,
+    config: args.config,
+    reportDate: args.reportDate,
+    watchlist: [],
+    overrides: { includeKr: false, includeGlobal: true },
+  });
+}
+
 export async function generateSourceListViaSearchApiGoogleNewsForWatchlist(args: {
   env: SearchApiEnv;
   config: ResearchConfig;
   reportDate: string;
   watchlist: ResearchConfig["watchlist"];
-  overrides?: { maxResults?: number; maxPages?: number; includeKr?: boolean; includeGlobal?: boolean };
+  overrides?: {
+    maxResults?: number;
+    maxPages?: number;
+    includeKr?: boolean;
+    includeGlobal?: boolean;
+    requireCompanyMention?: boolean;
+  };
 }): Promise<{ sources: SourceList; meta: { provider: "searchapi_google_news"; queries: number; results: number } }> {
   const lookbackDays = args.config.lookback_days ?? 7;
   const start = subtractDays(args.reportDate, Math.max(0, lookbackDays - 1));
@@ -402,13 +437,11 @@ export async function generateSourceListViaSearchApiGoogleNewsForWatchlist(args:
     for (const locale of locales) {
       let queryCompany = w.company;
       if (locale.label === "GLOBAL" && hasHangul(w.company) && !hasLatin(w.company)) {
+        // When the company name is Hangul-only, prefer a Latin alias/domain so GLOBAL search can match.
         const domain = pickDomainAlias(w.aliases ?? []);
         const alias = domain ?? (w.aliases ?? []).find((a) => hasLatin(a) && shouldUseCompanyTerm(a));
         if (!alias) continue;
         queryCompany = alias;
-      } else if (locale.label === "GLOBAL") {
-        const domain = pickDomainAlias(w.aliases ?? []);
-        if (domain) queryCompany = domain;
       }
       const companyTerms = Array.from(
         new Set([w.company, queryCompany, ...(w.aliases ?? [])].map((s) => s.trim()).filter(shouldUseCompanyTerm)),
@@ -434,9 +467,6 @@ export async function generateSourceListViaSearchApiGoogleNewsForWatchlist(args:
           const alias = domain ?? (w.aliases ?? []).find((a) => hasLatin(a) && shouldUseCompanyTerm(a));
           if (!alias) continue;
           queryCompany = alias;
-        } else {
-          const domain = pickDomainAlias(w.aliases ?? []);
-          if (domain) queryCompany = domain;
         }
         const companyTerms = Array.from(
           new Set([w.company, queryCompany, ...(w.aliases ?? [])].map((s) => s.trim()).filter(shouldUseCompanyTerm)),
@@ -478,7 +508,7 @@ export async function generateSourceListViaSearchApiGoogleNewsForWatchlist(args:
   }
 
   const concurrency = opts.concurrency ?? 4;
-  const requireCompanyMention = opts.require_company_mention ?? true;
+  const requireCompanyMention = args.overrides?.requireCompanyMention ?? (opts.require_company_mention ?? true);
 
   const results = await mapLimit(tasks, concurrency, async (t) => {
     try {

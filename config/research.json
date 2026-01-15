@@ -8,7 +8,14 @@
     "max_pages_per_query": 10,
     "concurrency": 3,
     "include_kr": true,
-    "include_global": true
+    "include_global": true,
+    "kr_min_sources": 100,
+    "discovery_candidates_per_category": 25,
+    "discovery_max_companies_total": 60,
+    "discovery_max_results_per_query": 25,
+    "discovery_max_pages_per_query": 5,
+    "global_watchlist_max_results_per_query": 30,
+    "global_watchlist_max_pages_per_query": 3
   },
   "watchlist_only": false,
   "min_companies_per_category": 5,
