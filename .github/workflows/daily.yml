@@ -27,6 +27,90 @@ jobs:
           node-version: 20
           cache: npm
           cache-dependency-path: package-lock.json
+      - name: Validate secrets
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
+          REQUIRE_GROUNDING: ${{ secrets.REQUIRE_GROUNDING }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_SECURE: ${{ secrets.SMTP_SECURE }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          MAIL_FROM: ${{ secrets.MAIL_FROM }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
+          MAIL_SUBJECT_PREFIX: ${{ secrets.MAIL_SUBJECT_PREFIX }}
+        run: |
+          set -euo pipefail
+
+          decode_b64() {
+            python3 - <<'PY'
+import base64, os, re, sys
+s = os.environ.get("B64", "")
+compact = re.sub(r"\\s+", "", s)
+if not compact:
+  sys.exit(0)
+if not re.fullmatch(r"[A-Za-z0-9+/=_-]+", compact):
+  sys.exit(0)
+normalized = compact.replace("-", "+").replace("_", "/")
+normalized += "=" * ((4 - (len(normalized) % 4)) % 4)
+try:
+  raw = base64.b64decode(normalized, validate=False)
+  sys.stdout.write(raw.decode("utf-8", errors="replace"))
+except Exception:
+  pass
+PY
+          }
+
+          required_keys=(GEMINI_API_KEY SMTP_HOST SMTP_USER SMTP_PASS MAIL_FROM MAIL_TO)
+
+          blob_name=""
+          blob=""
+          if [ -n "${ENV_B64:-}" ]; then
+            blob_name="ENV_B64"
+            blob="$ENV_B64"
+          elif [ -n "${MARKET_RADER_SECRET_YML:-}" ]; then
+            blob_name="MARKET_RADER_SECRET_YML"
+            blob="$MARKET_RADER_SECRET_YML"
+          fi
+
+          if [ -n "$blob" ]; then
+            export B64="$blob"
+            decoded="$(decode_b64 || true)"
+            content="$blob"
+            if printf "%s" "$decoded" | grep -Eq 'GEMINI_API_KEY|SMTP_HOST|MAIL_TO'; then
+              content="$decoded"
+            fi
+
+            missing=()
+            for k in "${required_keys[@]}"; do
+              if ! printf "%s\n" "$content" | grep -Eq "^[[:space:]]*${k}[[:space:]]*[:=]"; then
+                missing+=("$k")
+              fi
+            done
+
+            if [ "${#missing[@]}" -ne 0 ]; then
+              echo "Missing configuration in ${blob_name}: ${missing[*]}"
+              echo "- Provide dotenv lines (KEY=...), YAML mapping (KEY: ...), or base64 of either format."
+              exit 1
+            fi
+
+            exit 0
+          fi
+
+          missing=()
+          for k in "${required_keys[@]}"; do
+            v="${!k:-}"
+            if [ -z "$v" ]; then
+              missing+=("$k")
+            fi
+          done
+
+          if [ "${#missing[@]}" -ne 0 ]; then
+            echo "Missing configuration:"
+            echo "- Provide either Secrets.ENV_B64 (base64 of full .env) OR Secrets.MARKET_RADER_SECRET_YML (yaml/.env content) OR per-secret values (${missing[*]})."
+            exit 1
+          fi
       - name: Wait until 09:00 KST
         if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.skip_wait != 'true' }}
         shell: bash
@@ -43,25 +127,6 @@ jobs:
             echo "Already past 09:00 KST; continuing."
           fi
           echo "Start (KST): $(date)"
-      - name: Validate secrets
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        run: |
-          echo "ENV_B64_LEN=${#ENV_B64}"
-          echo "MARKET_RADER_SECRET_YML_LEN=${#MARKET_RADER_SECRET_YML}"
-          echo "GEMINI_API_KEY_LEN=${#GEMINI_API_KEY}"
-          if [ -n "$MARKET_RADER_SECRET_YML" ]; then
-            if printf "%s" "$MARKET_RADER_SECRET_YML" | grep -q 'GEMINI_API_KEY'; then
-              echo "MARKET_RADER_SECRET_YML_HAS_GEMINI_API_KEY=true"
-            else
-              echo "MARKET_RADER_SECRET_YML_HAS_GEMINI_API_KEY=false"
-            fi
-          fi
-          if [ -z "$ENV_B64" ] && [ -z "$MARKET_RADER_SECRET_YML" ] && [ -z "$GEMINI_API_KEY" ]; then
-            echo "Missing configuration:"
-            echo "- Set either Secrets.ENV_B64 (base64 of full .env) OR Secrets.MARKET_RADER_SECRET_YML (yaml/.env content) OR Secrets.GEMINI_API_KEY (+ SMTP secrets)."
-            exit 1
-          fi
       - name: Install
         run: npm ci
       - name: Restore seen history cache
@@ -71,77 +136,7 @@ jobs:
           key: seen-v1-${{ github.run_id }}
           restore-keys: |
             seen-v1-
-      - name: Run report (ENV_B64)
-        if: env.ENV_B64 != ''
-        run: |
-          printf "%s" "$ENV_B64" | base64 --decode > .env
-          if ! grep -qE '^GEMINI_API_KEY=.+$' .env; then
-            echo "ENV_B64 decoded, but GEMINI_API_KEY is missing/empty in .env"
-            exit 1
-          fi
-          npm run report
-
-      - name: Run report (MARKET_RADER_SECRET_YML)
-        if: env.ENV_B64 == '' && env.MARKET_RADER_SECRET_YML != ''
-        shell: bash
-        run: |
-          set -euo pipefail
-          raw="$MARKET_RADER_SECRET_YML"
-
-          # If it looks like base64, try decoding once.
-          if printf "%s" "$raw" | grep -Eq '^[A-Za-z0-9+/=]+$'; then
-            decoded="$(printf "%s" "$raw" | base64 --decode 2>/dev/null || true)"
-            if printf "%s" "$decoded" | grep -qE 'GEMINI_API_KEY|SMTP_HOST|MAIL_TO'; then
-              raw="$decoded"
-            fi
-          fi
-
-          if ! printf "%s" "$raw" | grep -q 'GEMINI_API_KEY'; then
-            echo "MARKET_RADER_SECRET_YML does not contain GEMINI_API_KEY. Provide either dotenv lines (GEMINI_API_KEY=...) or YAML (GEMINI_API_KEY: ...)."
-            exit 1
-          fi
-
-          # If it's already dotenv format, write as-is.
-          first_nonempty="$(printf "%s\n" "$raw" | sed -e 's/\r$//' | sed -n '/^[[:space:]]*#/d;/^[[:space:]]*$/d;p' | head -n 1 || true)"
-          if printf "%s" "$first_nonempty" | grep -q '='; then
-            printf "%s\n" "$raw" > .env
-            if ! grep -qE '^GEMINI_API_KEY=.+$' .env; then
-              echo "MARKET_RADER_SECRET_YML dotenv detected, but GEMINI_API_KEY is missing/empty"
-              exit 1
-            fi
-            npm run report
-            exit 0
-          fi
-
-          # Parse a simple YAML mapping (KEY: value) into dotenv.
-          printf "%s\n" "$raw" | awk '
-            function ltrim(s){ sub(/^[ \t\r\n]+/, "", s); return s }
-            function rtrim(s){ sub(/[ \t\r\n]+$/, "", s); return s }
-            function trim(s){ return rtrim(ltrim(s)) }
-            /^[ \t]*#/ { next }
-            /^[ \t]*$/ { next }
-            {
-              line=$0
-              sub(/\r$/, "", line)
-              pos = index(line, ":")
-              if (pos <= 1) next
-              key = trim(substr(line, 1, pos-1))
-              val = trim(substr(line, pos+1))
-              if (key ~ /^[A-Za-z_][A-Za-z0-9_]*$/) {
-                print key "=" val
-              }
-            }
-          ' > .env
-
-          if ! grep -qE '^GEMINI_API_KEY=.+$' .env; then
-            echo "MARKET_RADER_SECRET_YML YAML parsed, but GEMINI_API_KEY is missing/empty"
-            exit 1
-          fi
-
-          npm run report
-
-      - name: Run report (secrets)
-        if: env.ENV_B64 == '' && env.MARKET_RADER_SECRET_YML == ''
+      - name: Run report
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ secrets.GEMINI_MODEL || 'gemini-2.5-flash' }}

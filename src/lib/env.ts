@@ -8,10 +8,10 @@ function isBlank(value: unknown): boolean {
 function tryDecodeBase64(input: string): string | null {
   const compact = input.replace(/\s+/g, "");
   if (!compact) return null;
-  if (!/^[A-Za-z0-9+/=]+$/.test(compact)) return null;
-  if (compact.length % 4 !== 0) return null;
   try {
-    const decoded = Buffer.from(compact, "base64").toString("utf8");
+    if (!/^[A-Za-z0-9+/=_-]+$/.test(compact)) return null;
+    const normalized = compact.replace(/-/g, "+").replace(/_/g, "/").padEnd(compact.length + ((4 - (compact.length % 4)) % 4), "=");
+    const decoded = Buffer.from(normalized, "base64").toString("utf8");
     if (decoded.includes("GEMINI_API_KEY") || decoded.includes("SMTP_HOST") || decoded.includes("MAIL_TO")) {
       return decoded;
     }
