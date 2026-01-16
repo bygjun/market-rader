@@ -29,15 +29,26 @@ function tryDecodeBase64(input: string): string | null {
 function parseSimpleYamlMapping(raw: string): Record<string, string> {
   const result: Record<string, string> = {};
   const lines = raw.replace(/\r/g, "").split("\n");
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? "";
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith("#")) continue;
     const match = /^([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.*)$/.exec(trimmed);
     if (!match) continue;
     const key = match[1];
     let value = match[2] ?? "";
-    if (value === "|") continue;
-    value = value.replace(/^['"]/, "").replace(/['"]$/, "");
+    if (value === "|" || value === ">") {
+      const block: string[] = [];
+      for (let j = i + 1; j < lines.length; j++) {
+        const next = lines[j] ?? "";
+        if (/^[A-Za-z_][A-Za-z0-9_]*\s*:\s*/.test(next)) break;
+        block.push(next.replace(/^\s+/, ""));
+        i = j;
+      }
+      value = block.join("\n").trim();
+    } else {
+      value = value.replace(/^['"]/, "").replace(/['"]$/, "");
+    }
     result[key] = value;
   }
   return result;
@@ -66,7 +77,10 @@ function hydrateEnvFromSecrets(): void {
     try {
       const dotenvParsed = dotenvParse(raw);
       const yamlParsed = parseSimpleYamlMapping(raw);
-      parsed = { ...yamlParsed, ...dotenvParsed };
+      parsed = { ...dotenvParsed };
+      for (const [key, value] of Object.entries(yamlParsed)) {
+        if (typeof value === "string" && value.trim()) parsed[key] = value;
+      }
     } catch {
       parsed = parseSimpleYamlMapping(raw);
     }

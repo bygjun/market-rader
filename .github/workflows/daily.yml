@@ -83,20 +83,36 @@ jobs:
             export B64="$blob"
             decoded="$(decode_b64 || true)"
             content="$blob"
-            if printf "%s" "$decoded" | grep -Eq 'GEMINI_API_KEY|SMTP_HOST|MAIL_TO'; then
+            if printf "%s" "$decoded" | grep -Eq 'GEMINI_API_KEY|SEARCHAPI_API_KEY|SMTP_HOST|MAIL_TO'; then
               content="$decoded"
             fi
+
+            has_value() {
+              local key="$1"
+              local v=""
+              v="$(printf "%s\n" "$content" | sed -n -E \"s/^[[:space:]]*${key}[[:space:]]*[:=][[:space:]]*(.*)$/\\1/p\" | head -n 1)"
+              v="$(printf \"%s\" \"$v\" | sed -E 's/[[:space:]]*(#.*)?$//')"
+              v="$(printf \"%s\" \"$v\" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+              if [ -z \"$v\" ]; then return 1; fi
+              # YAML block scalar (we allow it; content is validated by runtime parsing).
+              if [ \"$v\" = \"|\" ] || [ \"$v\" = \">\" ]; then return 0; fi
+              return 0
+            }
 
             missing=()
             for k in "${required_keys[@]}"; do
               if ! printf "%s\n" "$content" | grep -Eq "^[[:space:]]*${k}[[:space:]]*[:=]"; then
+                missing+=("$k")
+                continue
+              fi
+              if ! has_value "$k"; then
                 missing+=("$k")
               fi
             done
 
             if [ "${#missing[@]}" -ne 0 ]; then
               echo "Missing configuration in ${blob_name}: ${missing[*]}"
-              echo "- Provide dotenv lines (KEY=...), YAML mapping (KEY: ...), or base64 of either format."
+              echo "- Provide dotenv lines (KEY=...), YAML mapping (KEY: value) or (KEY: | ...), or base64 of either format."
               exit 1
             fi
 
@@ -153,6 +169,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ secrets.GEMINI_MODEL || 'gemini-2.5-flash' }}
           REQUIRE_GROUNDING: ${{ secrets.REQUIRE_GROUNDING || 'false' }}
+          SEARCHAPI_API_KEY: ${{ secrets.SEARCHAPI_API_KEY }}
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
           SMTP_SECURE: ${{ secrets.SMTP_SECURE }}
