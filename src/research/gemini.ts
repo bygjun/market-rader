@@ -13,10 +13,22 @@ import { CompanyDiscoveryJsonSchema } from "./companyDiscoveryJsonSchema.js";
 import { OverseasTranslateItemJsonSchema, OverseasTranslateJsonSchema } from "./overseasTranslateSchema.js";
 
 function parseJsonLenient(text: string): unknown {
+  const attempt = (raw: string): unknown => {
+    const t = raw.trim().replace(/```(?:json)?/gi, "").trim();
+    try {
+      return JSON.parse(t);
+    } catch {
+      return JSON.parse(jsonrepair(t));
+    }
+  };
+
   try {
-    return JSON.parse(text);
-  } catch {
-    return JSON.parse(jsonrepair(text));
+    return attempt(text);
+  } catch (err) {
+    // LLM outputs sometimes contain unescaped control characters inside JSON strings.
+    // Removing them is lossy but preferable to failing the whole job.
+    const cleaned = text.replace(/[\u0000-\u001F\u007F]/g, " ");
+    return attempt(cleaned);
   }
 }
 
@@ -432,9 +444,14 @@ export async function generateCompanyHomepages(args: {
 
   const { modelUsed, result } = await selectModelOrFallback({ env: args.env, ai, model: args.env.GEMINI_MODEL, run });
   const text = result.text ?? "";
-  const parsed = parseJsonLenient(text);
-  const homepages = CompanyHomepagesSchema.parse(parsed);
-  return { homepages, meta: { model: modelUsed } };
+  try {
+    const parsed = parseJsonLenient(text);
+    const homepages = CompanyHomepagesSchema.parse(parsed);
+    return { homepages, meta: { model: modelUsed } };
+  } catch (err) {
+    logger.warn({ err }, "Company homepages JSON parse failed; continuing without homepages");
+    return { homepages: CompanyHomepagesSchema.parse({}), meta: { model: modelUsed } };
+  }
 }
 
 export async function generateCompanyHq(args: {
@@ -458,9 +475,14 @@ export async function generateCompanyHq(args: {
 
   const { modelUsed, result } = await selectModelOrFallback({ env: args.env, ai, model: args.env.GEMINI_MODEL, run });
   const text = result.text ?? "";
-  const parsed = parseJsonLenient(text);
-  const hq = CompanyHqSchema.parse(parsed);
-  return { hq, meta: { model: modelUsed } };
+  try {
+    const parsed = parseJsonLenient(text);
+    const hq = CompanyHqSchema.parse(parsed);
+    return { hq, meta: { model: modelUsed } };
+  } catch (err) {
+    logger.warn({ err }, "Company HQ JSON parse failed; continuing without HQ mapping");
+    return { hq: CompanyHqSchema.parse({}), meta: { model: modelUsed } };
+  }
 }
 
 export async function generateCompanyDiscovery(args: {

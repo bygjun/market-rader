@@ -6,6 +6,8 @@ REPO="${REPO:-market-rader}"
 JOB_SEND="${JOB_SEND:-market-rader}"
 JOB_DRYRUN="${JOB_DRYRUN:-market-rader-dryrun}"
 SECRET_NAME="${SECRET_NAME:-market-rader-env-b64}"
+STATE_BUCKET="${STATE_BUCKET:-}"
+HISTORY_OBJECT="${HISTORY_OBJECT:-market-rader/seen.json}"
 SCHEDULER_JOB="${SCHEDULER_JOB:-market-rader-daily}"
 SCHEDULER_SA_NAME="${SCHEDULER_SA_NAME:-market-rader-scheduler}"
 SCHEDULE="${SCHEDULE:-0 9 * * *}"
@@ -47,7 +49,9 @@ gcloud services enable \
   cloudscheduler.googleapis.com \
   artifactregistry.googleapis.com \
   cloudbuild.googleapis.com \
-  secretmanager.googleapis.com
+  secretmanager.googleapis.com \
+  storage.googleapis.com \
+  cloudresourcemanager.googleapis.com
 
 gcloud artifacts repositories create "${REPO}" \
   --repository-format=docker \
@@ -67,6 +71,23 @@ gcloud secrets add-iam-policy-binding "${SECRET_NAME}" \
   --member "serviceAccount:${RUNTIME_SA}" \
   --role "roles/secretmanager.secretAccessor" >/dev/null || true
 
+if [ -z "${STATE_BUCKET}" ]; then
+  STATE_BUCKET="${PROJECT}-${REPO}-state"
+fi
+HISTORY_PATH="gs://${STATE_BUCKET}/${HISTORY_OBJECT}"
+
+echo "Upserting state bucket: gs://${STATE_BUCKET}"
+if ! gcloud storage buckets describe "gs://${STATE_BUCKET}" >/dev/null 2>&1; then
+  gcloud storage buckets create "gs://${STATE_BUCKET}" \
+    --location "${REGION}" \
+    --uniform-bucket-level-access
+fi
+
+echo "Granting runtime bucket access to: ${RUNTIME_SA}"
+gcloud storage buckets add-iam-policy-binding "gs://${STATE_BUCKET}" \
+  --member "serviceAccount:${RUNTIME_SA}" \
+  --role "roles/storage.objectAdmin" >/dev/null || true
+
 IMAGE="${REGION}-docker.pkg.dev/${PROJECT}/${REPO}/app:latest"
 if [ "${BUILD_MODE}" = "cloudbuild" ]; then
   echo "Building image with Cloud Build: ${IMAGE}"
@@ -84,7 +105,7 @@ if gcloud run jobs describe "${JOB_SEND}" --region "${REGION}" >/dev/null 2>&1; 
     --image "${IMAGE}" \
     --region "${REGION}" \
     --set-secrets "ENV_B64=${SECRET_NAME}:latest" \
-    --set-env-vars "TZ=${TIME_ZONE}" \
+    --set-env-vars "TZ=${TIME_ZONE},HISTORY_PATH=${HISTORY_PATH}" \
     --max-retries 0 \
     --task-timeout 7200
 else
@@ -92,7 +113,7 @@ else
     --image "${IMAGE}" \
     --region "${REGION}" \
     --set-secrets "ENV_B64=${SECRET_NAME}:latest" \
-    --set-env-vars "TZ=${TIME_ZONE}" \
+    --set-env-vars "TZ=${TIME_ZONE},HISTORY_PATH=${HISTORY_PATH}" \
     --max-retries 0 \
     --task-timeout 7200
 fi
@@ -103,7 +124,7 @@ if gcloud run jobs describe "${JOB_DRYRUN}" --region "${REGION}" >/dev/null 2>&1
     --image "${IMAGE}" \
     --region "${REGION}" \
     --set-secrets "ENV_B64=${SECRET_NAME}:latest" \
-    --set-env-vars "TZ=${TIME_ZONE}" \
+    --set-env-vars "TZ=${TIME_ZONE},HISTORY_PATH=${HISTORY_PATH}" \
     --args=--dry-run \
     --max-retries 0 \
     --task-timeout 7200
@@ -112,7 +133,7 @@ else
     --image "${IMAGE}" \
     --region "${REGION}" \
     --set-secrets "ENV_B64=${SECRET_NAME}:latest" \
-    --set-env-vars "TZ=${TIME_ZONE}" \
+    --set-env-vars "TZ=${TIME_ZONE},HISTORY_PATH=${HISTORY_PATH}" \
     --args=--dry-run \
     --max-retries 0 \
     --task-timeout 7200
@@ -157,5 +178,5 @@ else
 fi
 
 echo "OK. Next:"
-echo "- Dry-run execution: gcloud run jobs run \"${JOB_DRYRUN}\" --region \"${REGION}\""
-echo "- Real execution (sends email): gcloud run jobs run \"${JOB_SEND}\" --region \"${REGION}\""
+echo "- Dry-run execution: gcloud run jobs execute \"${JOB_DRYRUN}\" --region \"${REGION}\" --wait"
+echo "- Real execution (sends email): gcloud run jobs execute \"${JOB_SEND}\" --region \"${REGION}\" --wait"

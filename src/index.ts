@@ -272,18 +272,19 @@ async function main(): Promise<void> {
     }
     const baseDate = opts.asOf ? new Date(`${opts.asOf}T00:00:00.000Z`) : now;
     const reportDate = getIsoDateInTimeZone(baseDate, timeZone);
-    const weekNumber = getWeekNumberInTimeZone(baseDate, timeZone);
-    const weekYear = getWeekYearInTimeZone(baseDate, timeZone);
-    const weekKey = `${weekYear}-W${String(weekNumber).padStart(2, "0")}`;
+	    const weekNumber = getWeekNumberInTimeZone(baseDate, timeZone);
+	    const weekYear = getWeekYearInTimeZone(baseDate, timeZone);
+	    const weekKey = `${weekYear}-W${String(weekNumber).padStart(2, "0")}`;
 
-    const historyPath = path.resolve(process.cwd(), researchConfig.history_path ?? "out/seen.json");
-    const history = await loadSeenHistory(historyPath);
-    // Only dedupe on real sends; for dry-runs we prefer showing the full month of items.
-    const seenThisWeek = opts.dryRun ? new Set<string>() : getSeenUrlSetForWeek(history, weekKey);
-    dedupeCtx = opts.dryRun ? null : { historyPath, weekKey, seenThisWeek, history };
+	    const historyPathRaw = process.env.HISTORY_PATH ?? researchConfig.history_path ?? "out/seen.json";
+	    const historyPath = historyPathRaw.startsWith("gs://") ? historyPathRaw : path.resolve(process.cwd(), historyPathRaw);
+	    // Only dedupe on real sends; for dry-runs we prefer showing the full month of items.
+	    const history = opts.dryRun ? null : await loadSeenHistory(historyPath);
+	    const seenThisWeek = opts.dryRun ? new Set<string>() : getSeenUrlSetForWeek(history!, weekKey);
+	    dedupeCtx = opts.dryRun ? null : { historyPath, weekKey, seenThisWeek, history: history! };
 
-    const baseSourcesPrompt = buildSourcesPrompt({ reportDate, weekNumber, config: researchConfig });
-    const categoryIds = researchConfig.categories.map((c) => c.id);
+	    const baseSourcesPrompt = buildSourcesPrompt({ reportDate, weekNumber, config: researchConfig });
+	    const categoryIds = researchConfig.categories.map((c) => c.id);
 
     let sourcesResult:
       | Awaited<ReturnType<typeof generateSourceList>>
@@ -921,11 +922,15 @@ async function main(): Promise<void> {
       top_highlights: rebuildTopHighlightsFromCategoryUpdates({ report: parsedReport, max: 3 }),
       action_items: rebuildActionItemsFromCategoryUpdates(parsedReport, 6),
     });
-  }
-  if (geminiEnv) {
-    const localized = await translateOverseasSectionToKorean({ env: geminiEnv, report: parsedReport });
-    parsedReport = localized.report;
-  }
+	  }
+	  if (geminiEnv) {
+	    try {
+	      const localized = await translateOverseasSectionToKorean({ env: geminiEnv, report: parsedReport });
+	      parsedReport = localized.report;
+	    } catch (err) {
+	      logger.warn({ err }, "Overseas translation failed; continuing without translation");
+	    }
+	  }
 
   const markdown = renderMarkdown(parsedReport, researchConfig, renderMeta);
   const html = await renderHtmlFromMarkdown(markdown);

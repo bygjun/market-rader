@@ -29,6 +29,7 @@ cp .env.example .env
 - 리포트에는 `overseas_competitor_updates`(해외 경쟁사 동향) 섹션이 포함되며, 최근 업데이트가 없으면 빈 배열로 출력됩니다.
 - (선택) `verify_source_urls=true`로 켜면 HTTP 상태체크로 404 링크를 추가로 제거/수정합니다.
 - (선택) 같은 주(ISO week) 내 중복 발송 방지를 위해 `history_path`(기본: `out/seen.json`)에 이번 주에 보낸 URL을 저장합니다.
+  - Cloud Run에서는 파일이 영구 저장되지 않으므로 `HISTORY_PATH=gs://...`(권장)로 GCS에 저장하면 중복 발송을 막을 수 있습니다.
   - `drop_items_without_valid_url=true`일 때는 404/soft-404 뿐 아니라, 특정 사이트가 “없는 경로를 홈으로 보여주는” 케이스(200이지만 실제 콘텐츠가 아닌 경우)도 자동으로 제거합니다.
 
 ## 실행
@@ -102,7 +103,7 @@ GitHub Actions 대신 GCP에서 “컨테이너를 매일 1번 실행”하는 �
 ```bash
 gcloud auth login
 gcloud config set project YOUR_PROJECT_ID
-gcloud services enable run.googleapis.com cloudscheduler.googleapis.com artifactregistry.googleapis.com cloudbuild.googleapis.com secretmanager.googleapis.com
+gcloud services enable run.googleapis.com cloudscheduler.googleapis.com artifactregistry.googleapis.com cloudbuild.googleapis.com secretmanager.googleapis.com storage.googleapis.com cloudresourcemanager.googleapis.com
 ```
 
 ### 2) Secret 등록 (권장: `ENV_B64` 하나로)
@@ -214,7 +215,7 @@ gcloud scheduler jobs update http market-rader-daily \
 
 참고:
 - 실행 로그는 `Cloud Run > Jobs > Executions`에서 확인합니다.
-- 중복 발송 방지용 `out/seen.json`은 Cloud Run Job 환경에선 기본적으로 영구 저장이 안 됩니다(필요하면 GCS로 저장하도록 확장 가능).
+- 중복 발송 방지 history는 `HISTORY_PATH=gs://...`로 지정하면 GCS에 저장되어 매일 실행해도 같은 주 내 중복 발송을 막습니다(스크립트 기본 설정).
 
 ### (옵션) 스크립트로 한 번에 배포
 

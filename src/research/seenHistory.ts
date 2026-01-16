@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { WeeklyReport } from "./schema.js";
+import { isGsPath, readGsText, writeGsText } from "../lib/gcs.js";
 
 type SeenHistoryV1 = {
   version: 1;
@@ -46,6 +47,11 @@ function safeParseHistory(raw: string): SeenHistoryV1 | null {
 }
 
 export async function loadSeenHistory(filePath: string): Promise<SeenHistoryV1> {
+  if (isGsPath(filePath)) {
+    const raw = await readGsText(filePath);
+    if (!raw.trim()) return { version: 1, weeks: {} };
+    return safeParseHistory(raw) ?? { version: 1, weeks: {} };
+  }
   try {
     const raw = await readFile(filePath, "utf8");
     return safeParseHistory(raw) ?? { version: 1, weeks: {} };
@@ -125,6 +131,10 @@ export function addReportUrlsToHistory(args: {
 }
 
 export async function saveSeenHistory(filePath: string, history: SeenHistoryV1): Promise<void> {
+  if (isGsPath(filePath)) {
+    await writeGsText(filePath, `${JSON.stringify(history, null, 2)}\n`);
+    return;
+  }
   await mkdir(path.dirname(filePath), { recursive: true });
   await writeFile(filePath, `${JSON.stringify(history, null, 2)}\n`, "utf8");
 }
