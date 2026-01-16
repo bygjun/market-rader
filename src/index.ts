@@ -958,7 +958,9 @@ async function main(): Promise<void> {
   logger.info({ subject }, "Email sent");
 }
 
-main().catch((err) => {
-  logger.error({ err }, "Fatal error");
-  process.exitCode = 1;
-});
+main()
+  .then(() => process.exit(0))
+  .catch((err) => {
+    logger.error({ err }, "Fatal error");
+    process.exit(1);
+  });

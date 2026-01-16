@@ -1,0 +1,14 @@
+node_modules
+dist
+out
+.git
+.github
+.env
+.env.*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.tsbuildinfo
+*.log
+coverage
+.DS_Store
