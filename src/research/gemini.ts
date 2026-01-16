@@ -677,7 +677,13 @@ export async function translateOverseasSectionToKorean(args: {
       run,
     });
     modelUsed = itemModelUsed;
-    const parsed = parseJsonLenient(result.text ?? "");
+    let parsed: unknown = null;
+    try {
+      parsed = parseJsonLenient(result.text ?? "");
+    } catch (err) {
+      logger.warn({ err, company: item.company }, "Overseas translation item parse failed; skipping item translation");
+      return null;
+    }
     if (!parsed || typeof parsed !== "object") return null;
     const t = parsed as any;
     if (t.company !== item.company) return null;
