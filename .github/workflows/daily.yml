@@ -44,94 +44,131 @@ jobs:
         run: |
           set -euo pipefail
 
-          source_provider="$(node -p "(() => { try { return require('fs').existsSync('config/research.json') ? (JSON.parse(require('fs').readFileSync('config/research.json','utf8')).source_provider || 'gemini_grounded') : 'gemini_grounded' } catch { return 'gemini_grounded' } })()")"
-          echo "Detected source_provider: ${source_provider}"
+          node - <<'NODE'
+          const fs = require("node:fs");
 
-          decode_b64() {
-            local compact normalized mod
-            compact="$(printf "%s" "${B64:-}" | tr -d ' \n\r\t')"
-            [ -z "$compact" ] && return 0
-            printf "%s" "$compact" | grep -Eq '^[A-Za-z0-9+/=_-]+$' || return 0
-            normalized="$(printf "%s" "$compact" | tr '_-' '/+')"
-            mod=$(( ${#normalized} % 4 ))
-            if [ "$mod" -eq 2 ]; then
-              normalized="${normalized}=="
-            elif [ "$mod" -eq 3 ]; then
-              normalized="${normalized}="
-            elif [ "$mod" -ne 0 ]; then
-              return 0
-            fi
-            printf "%s" "$normalized" | base64 --decode 2>/dev/null || true
+          function isBlank(value) {
+            return typeof value !== "string" || value.trim().length === 0;
           }
 
-          required_keys=(GEMINI_API_KEY SMTP_HOST SMTP_USER SMTP_PASS MAIL_FROM MAIL_TO)
-          if [ "$source_provider" = "searchapi_google_news" ]; then
-            required_keys+=(SEARCHAPI_API_KEY)
-          fi
-
-          blob_name=""
-          blob=""
-          if [ -n "${ENV_B64:-}" ]; then
-            blob_name="ENV_B64"
-            blob="$ENV_B64"
-          elif [ -n "${MARKET_RADER_SECRET_YML:-}" ]; then
-            blob_name="MARKET_RADER_SECRET_YML"
-            blob="$MARKET_RADER_SECRET_YML"
-          fi
-
-          if [ -n "$blob" ]; then
-            export B64="$blob"
-            decoded="$(decode_b64 || true)"
-            content="$blob"
-            if printf "%s" "$decoded" | grep -Eq 'GEMINI_API_KEY|SEARCHAPI_API_KEY|SMTP_HOST|MAIL_TO'; then
-              content="$decoded"
-            fi
-
-            has_value() {
-              local key="$1"
-              local v=""
-              v="$(printf "%s\n" "$content" | sed -n -E \"s/^[[:space:]]*${key}[[:space:]]*[:=][[:space:]]*(.*)$/\\1/p\" | head -n 1)"
-              v="$(printf \"%s\" \"$v\" | sed -E 's/[[:space:]]*(#.*)?$//')"
-              v="$(printf \"%s\" \"$v\" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-              if [ -z \"$v\" ]; then return 1; fi
-              # YAML block scalar (we allow it; content is validated by runtime parsing).
-              if [ \"$v\" = \"|\" ] || [ \"$v\" = \">\" ]; then return 0; fi
-              return 0
+          function detectSourceProvider() {
+            try {
+              if (!fs.existsSync("config/research.json")) return "gemini_grounded";
+              const raw = fs.readFileSync("config/research.json", "utf8");
+              const config = JSON.parse(raw);
+              return config?.source_provider || "gemini_grounded";
+            } catch {
+              return "gemini_grounded";
             }
+          }
 
-            missing=()
-            for k in "${required_keys[@]}"; do
-              if ! printf "%s\n" "$content" | grep -Eq "^[[:space:]]*${k}[[:space:]]*[:=]"; then
-                missing+=("$k")
-                continue
-              fi
-              if ! has_value "$k"; then
-                missing+=("$k")
-              fi
-            done
+          function decodeMaybeBase64(input) {
+            const compact = String(input ?? "").replace(/\s+/g, "");
+            if (!compact) return null;
+            if (!/^[A-Za-z0-9+/=_-]+$/.test(compact)) return null;
+            const normalized = compact.replace(/-/g, "+").replace(/_/g, "/").padEnd(compact.length + ((4 - (compact.length % 4)) % 4), "=");
+            try {
+              return Buffer.from(normalized, "base64").toString("utf8");
+            } catch {
+              return null;
+            }
+          }
 
-            if [ "${#missing[@]}" -ne 0 ]; then
-              echo "Missing configuration in ${blob_name}: ${missing[*]}"
-              echo "- Provide dotenv lines (KEY=...), YAML mapping (KEY: value) or (KEY: | ...), or base64 of either format."
-              exit 1
-            fi
+          function parseDotenv(raw) {
+            const out = {};
+            const lines = String(raw ?? "").replace(/\r/g, "").split("\n");
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (!trimmed || trimmed.startsWith("#")) continue;
+              const m = /^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(trimmed);
+              if (!m) continue;
+              const key = m[1];
+              let value = m[2] ?? "";
+              value = value.replace(/^['"]/, "").replace(/['"]$/, "");
+              out[key] = value;
+            }
+            return out;
+          }
 
-            exit 0
-          fi
+          function parseSimpleYamlMapping(raw) {
+            const out = {};
+            const lines = String(raw ?? "").replace(/\r/g, "").split("\n");
+            for (let i = 0; i < lines.length; i++) {
+              const line = lines[i] ?? "";
+              const trimmed = line.trim();
+              if (!trimmed || trimmed.startsWith("#")) continue;
+              const m = /^([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.*)$/.exec(trimmed);
+              if (!m) continue;
+              const key = m[1];
+              let value = m[2] ?? "";
+              if (value === "|" || value === ">") {
+                const block = [];
+                for (let j = i + 1; j < lines.length; j++) {
+                  const next = lines[j] ?? "";
+                  if (/^[A-Za-z_][A-Za-z0-9_]*\s*:\s*/.test(next)) break;
+                  block.push(next.replace(/^\s+/, ""));
+                  i = j;
+                }
+                value = block.join("\n").trim();
+              } else {
+                value = value.replace(/^['"]/, "").replace(/['"]$/, "");
+              }
+              out[key] = value;
+            }
+            return out;
+          }
 
-          missing=()
-          for k in "${required_keys[@]}"; do
-            v="${!k:-}"
-            if [ -z "$v" ]; then
-              missing+=("$k")
-            fi
-          done
+          function hydrateFromBlob(rawBlob) {
+            const decoded = decodeMaybeBase64(rawBlob);
+            const useDecoded =
+              decoded && /GEMINI_API_KEY|SEARCHAPI_API_KEY|SMTP_HOST|MAIL_TO/.test(decoded) ? decoded : null;
+            const content = useDecoded ?? String(rawBlob ?? "");
+            const dotenv = parseDotenv(content);
+            const yaml = parseSimpleYamlMapping(content);
+            const parsed = { ...dotenv };
+            for (const [k, v] of Object.entries(yaml)) {
+              if (typeof v === "string" && v.trim()) parsed[k] = v.trim();
+            }
+            for (const [k, v] of Object.entries(parsed)) {
+              if (isBlank(process.env[k]) && typeof v === "string" && v.trim()) process.env[k] = v.trim();
+            }
+          }
 
-          if [ "${#missing[@]}" -ne 0 ]; then
-            echo "Missing configuration:"
-            echo "- Provide either Secrets.ENV_B64 (base64 of full .env) OR Secrets.MARKET_RADER_SECRET_YML (yaml/.env content) OR per-secret values (${missing[*]})."
-            exit 1
-          fi
+          const sourceProvider = detectSourceProvider();
+          console.log(`Detected source_provider: ${sourceProvider}`);
+
+          const requiredKeys = ["GEMINI_API_KEY", "SMTP_HOST", "SMTP_USER", "SMTP_PASS", "MAIL_FROM", "MAIL_TO"];
+          if (sourceProvider === "searchapi_google_news") requiredKeys.push("SEARCHAPI_API_KEY");
+
+          const blobName = !isBlank(process.env.ENV_B64)
+            ? "ENV_B64"
+            : !isBlank(process.env.MARKET_RADER_SECRET_YML)
+              ? "MARKET_RADER_SECRET_YML"
+              : "";
+          const blob = blobName ? process.env[blobName] : "";
+
+          if (blobName) {
+            hydrateFromBlob(blob);
+            const missing = requiredKeys.filter((k) => isBlank(process.env[k]));
+            if (missing.length) {
+              console.error(`Missing configuration in ${blobName}: ${missing.join(" ")}`);
+              console.error("- Provide dotenv lines (KEY=...), YAML mapping (KEY: value / KEY: | ...), or base64 of either format.");
+              process.exit(1);
+            }
+            process.exit(0);
+          }
+
+          const missing = requiredKeys.filter((k) => isBlank(process.env[k]));
+          if (missing.length) {
+            console.error("Missing configuration:");
+            console.error(
+              `- Provide either Secrets.ENV_B64 (base64 of full .env) OR Secrets.MARKET_RADER_SECRET_YML (yaml/.env content) OR per-secret values (${missing.join(
+                " ",
+              )}).`,
+            );
+            process.exit(1);
+          }
+          NODE
       - name: Wait until 09:00 KST
         if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.skip_wait != 'true' }}
         shell: bash
