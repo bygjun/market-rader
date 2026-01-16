@@ -12,7 +12,12 @@ function tryDecodeBase64(input: string): string | null {
     if (!/^[A-Za-z0-9+/=_-]+$/.test(compact)) return null;
     const normalized = compact.replace(/-/g, "+").replace(/_/g, "/").padEnd(compact.length + ((4 - (compact.length % 4)) % 4), "=");
     const decoded = Buffer.from(normalized, "base64").toString("utf8");
-    if (decoded.includes("GEMINI_API_KEY") || decoded.includes("SMTP_HOST") || decoded.includes("MAIL_TO")) {
+    if (
+      decoded.includes("GEMINI_API_KEY") ||
+      decoded.includes("SEARCHAPI_API_KEY") ||
+      decoded.includes("SMTP_HOST") ||
+      decoded.includes("MAIL_TO")
+    ) {
       return decoded;
     }
     return null;
@@ -55,9 +60,13 @@ function hydrateEnvFromSecrets(): void {
   for (const c of candidates) {
     const decoded = tryDecodeBase64(c.raw);
     const raw = decoded ?? c.raw;
+    // `dotenv.parse()` is permissive and may return `{}` for non-dotenv formats (e.g. YAML),
+    // so we attempt both and merge.
     let parsed: Record<string, string> = {};
     try {
-      parsed = dotenvParse(raw);
+      const dotenvParsed = dotenvParse(raw);
+      const yamlParsed = parseSimpleYamlMapping(raw);
+      parsed = { ...yamlParsed, ...dotenvParsed };
     } catch {
       parsed = parseSimpleYamlMapping(raw);
     }
@@ -126,5 +135,14 @@ export function loadMailEnv(): MailEnv {
 
 export function loadSearchApiEnv(): SearchApiEnv {
   hydrateEnvFromSecrets();
-  return SearchApiEnvSchema.parse(process.env);
+  try {
+    return SearchApiEnvSchema.parse(process.env);
+  } catch (err) {
+    if (isBlank(process.env.SEARCHAPI_API_KEY)) {
+      throw new Error(
+        'Missing SEARCHAPI_API_KEY. When `config.research.json` sets `source_provider="searchapi_google_news"`, provide `SEARCHAPI_API_KEY` via `.env`, GitHub Actions secret `SEARCHAPI_API_KEY`, or include it in `ENV_B64`.',
+      );
+    }
+    throw err;
+  }
 }

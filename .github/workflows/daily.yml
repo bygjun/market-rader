@@ -32,6 +32,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
           REQUIRE_GROUNDING: ${{ secrets.REQUIRE_GROUNDING }}
+          SEARCHAPI_API_KEY: ${{ secrets.SEARCHAPI_API_KEY }}
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
           SMTP_SECURE: ${{ secrets.SMTP_SECURE }}
@@ -42,6 +43,9 @@ jobs:
           MAIL_SUBJECT_PREFIX: ${{ secrets.MAIL_SUBJECT_PREFIX }}
         run: |
           set -euo pipefail
+
+          source_provider="$(node -p "(() => { try { return require('fs').existsSync('config/research.json') ? (JSON.parse(require('fs').readFileSync('config/research.json','utf8')).source_provider || 'gemini_grounded') : 'gemini_grounded' } catch { return 'gemini_grounded' } })()")"
+          echo "Detected source_provider: ${source_provider}"
 
           decode_b64() {
             local compact normalized mod
@@ -61,6 +65,9 @@ jobs:
           }
 
           required_keys=(GEMINI_API_KEY SMTP_HOST SMTP_USER SMTP_PASS MAIL_FROM MAIL_TO)
+          if [ "$source_provider" = "searchapi_google_news" ]; then
+            required_keys+=(SEARCHAPI_API_KEY)
+          fi
 
           blob_name=""
           blob=""
@@ -119,8 +126,15 @@ jobs:
           now="$(date +%s)"
           if [ "$now" -lt "$target" ]; then
             wait="$((target - now))"
-            echo "Sleeping ${wait}s until 09:00 KST..."
-            sleep "$wait"
+            echo "Waiting ${wait}s until 09:00 KST..."
+            while [ "$wait" -gt 0 ]; do
+              chunk=300
+              if [ "$wait" -lt "$chunk" ]; then chunk="$wait"; fi
+              echo "Remaining: ${wait}s (next log in ${chunk}s) — $(date)"
+              sleep "$chunk"
+              now="$(date +%s)"
+              wait="$((target - now))"
+            done
           else
             echo "Already past 09:00 KST; continuing."
           fi

@@ -82,6 +82,7 @@ npm run report -- --dry-run --input-report config/sample-report.json
 필수 Secrets:
 - `GEMINI_API_KEY`
 - (선택) `GEMINI_MODEL`, `REQUIRE_GROUNDING`
+- `source_provider="searchapi_google_news"`를 쓰는 경우: `SEARCHAPI_API_KEY`
 - `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`
 - `MAIL_FROM`, `MAIL_TO`
 
